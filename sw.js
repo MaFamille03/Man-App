@@ -4,7 +4,7 @@
    l'appareil). Stratégie "réseau d'abord" pour toujours servir la dernière
    version publiée quand une connexion est disponible, et se rabattre sur la
    copie locale sinon. */
-const CACHE_NAME = 'kegel-control-shell-v1';
+const CACHE_NAME = 'kegel-control-shell-v2';
 const SHELL_FILES = [
   './',
   './index.html',

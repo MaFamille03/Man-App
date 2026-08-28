@@ -1,16 +1,15 @@
 /* ==========================================================================
-   KEGEL CONTROL — Prototype web (PWA), 100% local (aucun compte, aucun serveur)
-   Flux : Questionnaire -> Profil (4 dimensions) -> Programme adaptatif (20 sem.)
-          -> Séance guidée (moteur d'étapes piloté par données + vibrations)
-          -> Feedback post-séance -> Tableau de bord / Progrès
-   Tout est persisté en localStorage sur cet appareil.
+   KEGEL CONTROL — Prototype web (PWA), 100% local (aucun serveur)
+   Flux : Compte (inscription/connexion, local à l'appareil)
+          -> Questionnaire -> Profil (4 dimensions)
+          -> Exercice de Kegel quotidien (6 types de contraction, moteur piloté
+             par données + vibrations + bips sonores) x2/jour, 2h d'écart mini
+          -> Feedback (une fois, en fin d'exercice complet) -> Tableau de bord
+   Tout est persisté en localStorage sur cet appareil. Aucune donnée ne quitte
+   le téléphone : il n'y a pas de serveur pour la recevoir.
 ========================================================================== */
 
-/* ============ 0. VISUELS — motif de marque (cible) et icônes de dimension ============
-   Motif de marque : anneau + point central rouge sur fond noir (identité visuelle choisie
-   par l'utilisateur — mêmes proportions que l'icône PNG de l'app, voir make_icons.py),
-   évoquant la précision/le contrôle plutôt qu'une image anatomique. Rendu en SVG inline
-   (net à toutes les tailles). */
+/* ============ 0. VISUELS — motif de marque, icônes de dimension, icônes œil ============ */
 function brandMarkSvg(sizePx, color){
   color = color || '#DD1F2F';
   return `<svg width="${sizePx}" height="${sizePx}" viewBox="0 0 100 100" aria-hidden="true" focusable="false">
@@ -19,8 +18,6 @@ function brandMarkSvg(sizePx, color){
   </svg>`;
 }
 
-/* Petites icônes de dimension — formes génériques simples (cible, flamme, feuille, bouclier),
-   dessinées pour ce projet, en accord avec le style "line-icon" minimal du secteur. */
 const DIM_ICON_PATHS = {
   control: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/>',
   endurance: '<path d="M12 3c3.2 4.1 5.2 7 5.2 9.8a5.2 5.2 0 11-10.4 0C6.8 10 8.8 7.1 12 3z"/>',
@@ -30,6 +27,13 @@ const DIM_ICON_PATHS = {
 function dimIconSvg(key, size){
   size = size || 16;
   return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${DIM_ICON_PATHS[key] || ''}</svg>`;
+}
+
+const EYE_PATH_OPEN = '<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/>';
+const EYE_PATH_OFF = '<path d="M1 12s4-7 11-7c1.6 0 3 .3 4.3.8M23 12s-1.4 2.5-4 4.5M9.5 9.5a3 3 0 104 4"/><path d="M3 3l18 18"/>';
+function eyeSvg(open, size){
+  size = size || 18;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${open ? EYE_PATH_OPEN : EYE_PATH_OFF}</svg>`;
 }
 
 /* ============ 1. STOCKAGE ============ */
@@ -44,15 +48,40 @@ function lsSet(key, val){
 function lsRemoveAll(){
   Object.keys(localStorage).filter(k => k.startsWith(LS_PREFIX)).forEach(k => localStorage.removeItem(k));
 }
+function lsRemoveExcept(keepShortKeys){
+  Object.keys(localStorage).filter(k => k.startsWith(LS_PREFIX)).forEach(k => {
+    const short = k.slice(LS_PREFIX.length);
+    if(!keepShortKeys.includes(short)) localStorage.removeItem(k);
+  });
+}
 
-/* ============ 2. DONNÉES — dimensions, questionnaire, bibliothèque d'exercices ============ */
+/* ============ 2. COMPTE (local à l'appareil — prototype sans serveur) ============
+   Il n'y a pas de backend : "créer un compte" enregistre e-mail + mot de passe
+   (haché en SHA-256 via l'API Web Crypto, jamais stocké en clair) uniquement dans
+   le stockage local de CE téléphone. Ce n'est pas un système de comptes sécurisé
+   multi-appareils — juste le flux inscription/connexion demandé, appliqué à un
+   prototype 100% local. */
+async function hashPassword(pw){
+  try{
+    const enc = new TextEncoder().encode('kegelcontrol::' + pw);
+    const buf = await crypto.subtle.digest('SHA-256', enc);
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+  }catch(e){
+    return 'fallback:' + pw.length + ':' + pw.split('').reduce((a,c) => (a*31 + c.charCodeAt(0)) % 1000000007, 7);
+  }
+}
+function getAccount(){ return lsGet('account', null); }
+function isLoggedIn(){ return !!lsGet('loggedIn', false) && !!getAccount(); }
+
+/* ============ 3. DONNÉES — dimensions, questionnaire ============ */
 const DIMENSIONS = [
-  { key:'control',       label:'Contrôle périnéal' },
-  { key:'endurance',      label:'Endurance' },
-  { key:'relaxation',     label:'Relâchement' },
-  { key:'arousalControl', label:"Contrôle réflexe" }
+  { key:'control',       label:'Contrôle périnéal',  objective:"Sentir et déclencher la contraction avec précision, sans solliciter d'autres muscles." },
+  { key:'endurance',      label:'Endurance',          objective:"Maintenir l'effort dans la durée, sans que la contraction ne s'affaiblisse trop vite." },
+  { key:'relaxation',     label:'Relâchement',        objective:"Relâcher complètement entre les efforts, pour éviter les tensions résiduelles." },
+  { key:'arousalControl', label:"Contrôle réflexe",   objective:"Garder la maîtrise du plancher pelvien lors d'efforts brusques ou de sensations fortes." }
 ];
 const DIM_LABEL = Object.fromEntries(DIMENSIONS.map(d=>[d.key,d.label]));
+const DIM_OBJECTIVE = Object.fromEntries(DIMENSIONS.map(d=>[d.key,d.objective]));
 
 const SCALE_LABELS = ['Pas du tout', 'Un peu', 'Moyennement', 'Bien', 'Tout à fait'];
 
@@ -71,124 +100,128 @@ const QUESTIONNAIRE = [
   { id:'a3', dim:'arousalControl', text:"Je me sens en contrôle de mon plancher pelvien dans les moments de forte intensité physique ou émotionnelle." }
 ];
 
-/* Bibliothèque d'exercices — moteur piloté par données.
-   Types d'étape reconnus par le moteur (voir SessionEngine) :
-   CONTRACT / RELEASE / REST / HOLD / PULSE / RAMP_UP / RAMP_DOWN / LOOP */
-const EXERCISES = [
+/* ============ 4. L'EXERCICE DE KEGEL — protocole unique, quotidien, x2/jour ============
+   Moteur piloté par données. Types d'étape reconnus :
+     CONTRACT / RELEASE / REST / HOLD / PULSE / RAMP_UP / RAMP_DOWN / LOOP / PAUSE
+   Principe demandé : 6 types de contraction différents, séparés par des pauses de
+   9 secondes ("Repos"), pour un exercice complet d'environ 6 minutes. Les instants
+   de relâchement À L'INTÉRIEUR d'un type de contraction s'appellent "Relâcher" ;
+   le mot "Repos" désigne désormais uniquement la pause de 9s ENTRE deux types.
+   ⚠️ Les durées précises de chaque type (en secondes) n'ont pas été fournies dans
+   le cahier des charges reçu ici : les valeurs ci-dessous sont une estimation
+   raisonnable construite pour respecter "~6 minutes au total, 6 types, pauses de
+   9s" — donnez-moi les chiffres exacts si vous en avez et je les applique tels quels. */
+const PAUSE_BETWEEN_TYPES_MS = 9000;
+
+const CONTRACTION_TYPES = [
   {
-    id:'demarrage', name:'Démarrage', category:'control', level:1,
-    objective:"Premier contact en douceur avec la contraction et le relâchement volontaires.",
+    id:'demarrage', name:'Démarrage', category:'control',
     steps:[
-      { action:'REST', duration:4000 },
-      { action:'LOOP', times:4, steps:[
+      { action:'REST', duration:3000 },
+      { action:'LOOP', times:5, steps:[
         { action:'RAMP_UP', duration:1500, from:0, to:0.5 },
         { action:'HOLD', duration:2000, intensity:0.5 },
         { action:'RAMP_DOWN', duration:1500, from:0.5, to:0 },
         { action:'REST', duration:2500 }
-      ]},
-      { action:'REST', duration:3000 }
+      ]}
     ]
   },
   {
-    id:'pince-avant', name:'Pince avant', category:'control', level:2,
-    objective:"Travailler la précision et la rapidité d'activation du plancher pelvien.",
+    id:'pince-avant', name:'Pince avant', category:'control',
     steps:[
-      { action:'REST', duration:3000 },
-      { action:'LOOP', times:6, steps:[
+      { action:'REST', duration:2000 },
+      { action:'LOOP', times:12, steps:[
         { action:'RAMP_UP', duration:700, from:0, to:0.9 },
         { action:'HOLD', duration:1200, intensity:0.9 },
         { action:'RAMP_DOWN', duration:700, from:0.9, to:0 },
         { action:'REST', duration:1000 }
-      ]},
-      { action:'REST', duration:3000 }
+      ]}
     ]
   },
   {
-    id:'tremblement-stable', name:'Tremblement stable', category:'control', level:4,
-    objective:"Combiner rapidité et régularité pour affiner le contrôle fin.",
+    id:'tremblement-2', name:'Tremblement 2', category:'endurance',
     steps:[
       { action:'REST', duration:3000 },
-      { action:'LOOP', times:3, steps:[
-        { action:'PULSE', duration:4000, count:8, intensity:0.7 },
-        { action:'REST', duration:2000 }
-      ]},
-      { action:'REST', duration:3000 }
-    ]
-  },
-  {
-    id:'tremblement-2', name:'Tremblement 2', category:'endurance', level:2,
-    objective:"Développer l'endurance par de petites contractions rapides et répétées.",
-    steps:[
-      { action:'REST', duration:3000 },
-      { action:'LOOP', times:8, steps:[
+      { action:'LOOP', times:48, steps:[
         { action:'CONTRACT', duration:600, intensity:0.6 },
         { action:'RELEASE', duration:600 }
-      ]},
-      { action:'REST', duration:3000 }
+      ]}
     ]
   },
   {
-    id:'maintien-court-2', name:'Maintien court 2', category:'endurance', level:3,
-    objective:"Renforcer la capacité à maintenir une contraction modérée dans la durée.",
+    id:'maintien-court-2', name:'Maintien court 2', category:'endurance',
     steps:[
       { action:'REST', duration:3000 },
-      { action:'LOOP', times:5, steps:[
+      { action:'LOOP', times:6, steps:[
         { action:'CONTRACT', duration:1000, intensity:0.75 },
         { action:'HOLD', duration:5000, intensity:0.75 },
         { action:'RELEASE', duration:1500 },
         { action:'REST', duration:2000 }
-      ]},
-      { action:'REST', duration:3000 }
+      ]}
     ]
   },
   {
-    id:'respiration-relachement', name:'Respiration & relâchement', category:'relaxation', level:1,
-    objective:"Apprendre à relâcher consciemment et complètement après chaque contraction.",
+    id:'respiration-relachement', name:'Respiration & relâchement', category:'relaxation',
     steps:[
       { action:'REST', duration:4000 },
-      { action:'LOOP', times:4, steps:[
+      { action:'LOOP', times:5, steps:[
         { action:'RAMP_UP', duration:2000, from:0, to:0.55 },
         { action:'HOLD', duration:2500, intensity:0.55 },
         { action:'RAMP_DOWN', duration:2500, from:0.55, to:0 },
         { action:'REST', duration:3500 }
-      ]},
-      { action:'REST', duration:3000 }
+      ]}
     ]
   },
   {
-    id:'ancrage', name:'Ancrage', category:'arousalControl', level:3,
-    objective:"Travailler le maintien du contrôle pelvien face à une sollicitation soutenue.",
+    id:'ancrage', name:'Ancrage', category:'arousalControl',
     steps:[
       { action:'REST', duration:3000 },
-      { action:'LOOP', times:4, steps:[
+      { action:'LOOP', times:5, steps:[
         { action:'RAMP_UP', duration:1000, from:0, to:0.85 },
         { action:'HOLD', duration:4000, intensity:0.85 },
         { action:'PULSE', duration:2000, count:4, intensity:0.6 },
         { action:'RELEASE', duration:1500 },
         { action:'REST', duration:2000 }
-      ]},
-      { action:'REST', duration:3000 }
+      ]}
     ]
   }
 ];
 
+function buildDailyExercise(){
+  const steps = [];
+  CONTRACTION_TYPES.forEach((block, i) => {
+    const flatBlock = flattenSteps(block.steps).map(s => Object.assign({}, s, {
+      typeIndex: i, typeName: block.name, typeCategory: block.category
+    }));
+    steps.push(...flatBlock);
+    if(i < CONTRACTION_TYPES.length - 1){
+      steps.push({ action:'PAUSE', duration: PAUSE_BETWEEN_TYPES_MS, typeIndex:i, typeName: block.name });
+    }
+  });
+  return {
+    id:'exercice-kegel', name:'Exercice de Kegel',
+    objective:'6 types de contraction différents, séparés par des pauses de 9 secondes.',
+    steps
+  };
+}
+const KEGEL_EXERCISE = buildDailyExercise();
+
 const STEP_LABELS = {
-  CONTRACT:'Contraction', RELEASE:'Relâchement', REST:'Repos', HOLD:'Maintien',
-  PULSE:'Battements', RAMP_UP:'Montée en intensité', RAMP_DOWN:'Descente en intensité'
+  CONTRACT:'Contraction', RELEASE:'Relâchement', REST:'Relâcher', HOLD:'Maintien',
+  PULSE:'Battements', RAMP_UP:'Montée en intensité', RAMP_DOWN:'Descente en intensité',
+  PAUSE:'Repos'
 };
 
 const TOTAL_WEEKS = 20;
-const SESSIONS_PER_WEEK = 4;
-const MIN_INTERVAL_MS = 2 * 60 * 60 * 1000; // 2h minimum entre deux séances
+const DAILY_REQUIRED = 2;                       // 2 séances par jour, sans exception
+const MIN_INTERVAL_MS = 2 * 60 * 60 * 1000;      // 2h minimum entre les deux séances
 
-/* ============ 3. PROFIL / PROGRAMME / NIVEAUX ============ */
+/* ============ 5. PROFIL / NIVEAU / SÉANCES ============ */
 function getProfile(){ return lsGet('profile', null); }
-function getLevels(){ return lsGet('levels', { control:1, endurance:1, relaxation:1, arousalControl:1 }); }
-function setLevels(l){ lsSet('levels', l); }
+function getProgramLevel(){ return lsGet('programLevel', 1); }
+function setProgramLevel(v){ lsSet('programLevel', Math.max(1, Math.min(4, v))); }
 function getSessions(){ return lsGet('sessions', []); }
 function addSessionRecord(rec){ const s = getSessions(); s.push(rec); lsSet('sessions', s); }
-function getPainStreak(){ return lsGet('painStreak', { control:0, endurance:0, relaxation:0, arousalControl:0 }); }
-function setPainStreak(p){ lsSet('painStreak', p); }
 
 function levelFromScore(score){
   if(score < 35) return 1;
@@ -211,13 +244,19 @@ function finalizeQuestionnaire(answers){
   const scores = computeScores(answers);
   const profile = { scores, answers, createdAt: Date.now() };
   lsSet('profile', profile);
-  const levels = {};
-  DIMENSIONS.forEach(d => levels[d.key] = levelFromScore(scores[d.key]));
-  setLevels(levels);
+  const avg = DIMENSIONS.reduce((a,d) => a + scores[d.key], 0) / DIMENSIONS.length;
+  setProgramLevel(levelFromScore(avg));
   if(!lsGet('programStart', null)) lsSet('programStart', Date.now());
-  setPainStreak({ control:0, endurance:0, relaxation:0, arousalControl:0 });
+  lsSet('programPainStreak', 0);
   return profile;
 }
+
+function startOfDay(ts){ const d = new Date(ts); d.setHours(0,0,0,0); return d.getTime(); }
+function sessionsOnDay(ts){
+  const from = startOfDay(ts), to = from + 86400000;
+  return getSessions().filter(s => s.completed && s.date >= from && s.date < to);
+}
+function todaySessionsCount(){ return sessionsOnDay(Date.now()).length; }
 
 function programDayIndex(){
   const start = lsGet('programStart', Date.now());
@@ -225,61 +264,67 @@ function programDayIndex(){
 }
 function programWeekIndex(){ return Math.min(TOTAL_WEEKS - 1, Math.floor(programDayIndex() / 7)); }
 
-function pickExerciseForIndex(idx, profile, levels){
-  const dims = DIMENSIONS.map(d => d.key);
-  const sorted = [...dims].sort((a,b) => profile.scores[a] - profile.scores[b]);
-  const pattern = [sorted[0], sorted[1], sorted[0], sorted[2], sorted[1], sorted[3]];
-  const dim = pattern[idx % pattern.length];
-  const lvl = Math.min(4, Math.max(1, levels[dim] || 1));
-  const pool = EXERCISES.filter(e => e.category === dim && e.level <= lvl);
-  return (pool.length ? pool[pool.length - 1] : EXERCISES.find(e => e.category === dim)) || EXERCISES[0];
-}
-
-function getTodayExercise(){
-  const profile = getProfile();
-  if(!profile) return EXERCISES[0];
-  return pickExerciseForIndex(programDayIndex(), profile, getLevels());
-}
-
-function unlockedExercises(){
-  const levels = getLevels();
-  return EXERCISES.map(e => ({ ex:e, unlocked: e.level <= Math.min(4, Math.max(1, levels[e.category] || 1)) }));
-}
-
-function canStartSession(){
-  const last = lsGet('lastSessionEnd', 0);
-  const remaining = MIN_INTERVAL_MS - (Date.now() - last);
-  return remaining > 0 ? { ok:false, remainingMs: remaining } : { ok:true, remainingMs:0 };
-}
-
 function weekSessions(weekIdx){
   const start = lsGet('programStart', Date.now());
   const from = start + weekIdx * 7 * 86400000;
   const to = from + 7 * 86400000;
-  return getSessions().filter(s => s.date >= from && s.date < to);
+  return getSessions().filter(s => s.completed && s.date >= from && s.date < to);
+}
+function weekCompletionRatio(weekIdx){
+  return weekSessions(weekIdx).length / (7 * DAILY_REQUIRED);
+}
+
+/* "Pas de rattrapage" : une séance non faite le jour même est définitivement perdue —
+   il n'existe tout simplement aucun mécanisme pour enregistrer une séance à une date
+   passée, donc un jour incomplet reste incomplet pour toujours dans les statistiques. */
+function canStartSession(){
+  if(todaySessionsCount() >= DAILY_REQUIRED) return { ok:false, reason:'done' };
+  const last = lsGet('lastSessionEnd', 0);
+  const remaining = MIN_INTERVAL_MS - (Date.now() - last);
+  if(remaining > 0) return { ok:false, reason:'cooldown', remainingMs: remaining };
+  return { ok:true };
 }
 
 function adherencePct(){
   const dayIdx = programDayIndex();
-  const plannedSoFar = Math.max(1, Math.round((dayIdx + 1) * SESSIONS_PER_WEEK / 7));
+  const plannedSoFar = Math.max(1, (dayIdx + 1) * DAILY_REQUIRED);
   const completed = getSessions().filter(s => s.completed).length;
   return Math.max(0, Math.min(100, Math.round((completed / plannedSoFar) * 100)));
 }
 
 function currentStreak(){
-  const sessions = getSessions().filter(s => s.completed);
-  if(!sessions.length) return 0;
-  const days = new Set(sessions.map(s => new Date(s.date).toDateString()));
   let streak = 0;
   let cur = new Date();
-  while(days.has(cur.toDateString())){
+  if(sessionsOnDay(cur.getTime()).length < DAILY_REQUIRED){
+    cur.setDate(cur.getDate() - 1); // aujourd'hui pas encore fini : ne casse pas la série en cours
+  }
+  while(sessionsOnDay(cur.getTime()).length >= DAILY_REQUIRED){
     streak++;
     cur.setDate(cur.getDate() - 1);
   }
   return streak;
 }
 
-/* ============ 4. MOTEUR DE SÉANCE (données -> exécution) ============ */
+function currentWeekDayStatuses(){
+  const wk = programWeekIndex();
+  const start = lsGet('programStart', Date.now());
+  const weekStart = start + wk * 7 * 86400000;
+  const todayStart = startOfDay(Date.now());
+  const days = [];
+  for(let i=0;i<7;i++){
+    const dayTs = weekStart + i * 86400000;
+    const dStart = startOfDay(dayTs);
+    days.push({
+      dayTs, dateNum: new Date(dayTs).getDate(),
+      count: dStart > todayStart ? 0 : sessionsOnDay(dayTs).length,
+      isFuture: dStart > todayStart,
+      isToday: dStart === todayStart
+    });
+  }
+  return days;
+}
+
+/* ============ 6. MOTEUR DE SÉANCE (données -> exécution) ============ */
 function flattenSteps(steps){
   const out = [];
   (function walk(list){
@@ -298,45 +343,73 @@ function vibrate(ms){
   try{ if('vibrate' in navigator) navigator.vibrate(ms); }catch(e){}
 }
 
-function computeVisual(step, t){
-  const REST_SCALE = 1, MIN_SCALE = 0.55;
-  const ease = x => x < 0.3 ? (x/0.3) : 1;
-  let scale = REST_SCALE, glow = 0.12, restish = false;
+/* Retour sonore (Web Audio API) : navigator.vibrate() n'est PAS supporté par Safari
+   iOS (aucune implémentation de la Vibration API dans WebKit, y compris en PWA
+   installée) — les bips synthétisés ici sont donc le retour sensoriel fiable sur
+   iPhone, en plus des vibrations qui fonctionnent sur Android. */
+let audioCtx = null;
+function ensureAudioCtx(){
+  if(!audioCtx){
+    try{ audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }catch(e){ audioCtx = null; }
+  }
+  if(audioCtx && audioCtx.state === 'suspended'){ audioCtx.resume().catch(()=>{}); }
+  return audioCtx;
+}
+function soundEnabled(){ return lsGet('soundOn', true); }
+function setSoundEnabled(v){ lsSet('soundOn', !!v); }
+function beep(freq, durationMs, volume){
+  if(!soundEnabled()) return;
+  const ctx = ensureAudioCtx();
+  if(!ctx) return;
+  try{
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = freq || 660;
+    const now = ctx.currentTime;
+    const vol = volume != null ? volume : 0.16;
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(vol, now + 0.015);
+    gain.gain.linearRampToValueAtTime(0, now + durationMs/1000);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + durationMs/1000 + 0.02);
+  }catch(e){}
+}
+function cue(kind, intensity){
+  const inten = intensity != null ? intensity : 0.6;
+  switch(kind){
+    case 'contract': vibrate(Math.round(140*inten)+40); beep(880, 110, 0.15); break;
+    case 'rampup': vibrate(30); beep(760, 90, 0.11); break;
+    case 'release': beep(500, 140, 0.09); break;
+    case 'pause': beep(380, 220, 0.13); break;
+    case 'pulse-tick': vibrate(Math.round(60*inten)+30); beep(700, 55, 0.09); break;
+    case 'hold-tick': vibrate(22); beep(620, 45, 0.06); break;
+    case 'finish':
+      vibrate([80,60,80]);
+      [880,988,1175].forEach((f,i) => setTimeout(() => beep(f,170,0.16), i*140));
+      break;
+  }
+}
+
+/* Renvoie l'intensité de teinte rouge (0..1) à appliquer sur la bordure du cercle. */
+function computeGlow(step, t){
   const inten = step.intensity != null ? step.intensity : 0.6;
   switch(step.action){
-    case 'REST':
-      scale = REST_SCALE; glow = 0.08; restish = true; break;
-    case 'CONTRACT':
-      scale = REST_SCALE - (REST_SCALE-MIN_SCALE) * ease(t) * inten;
-      glow = 0.3 + 0.7*inten; break;
-    case 'RELEASE':
-      scale = MIN_SCALE + (REST_SCALE-MIN_SCALE) * t;
-      glow = 0.3*(1-t) + 0.08; break;
-    case 'HOLD':
-      scale = REST_SCALE - (REST_SCALE-MIN_SCALE) * inten;
-      glow = 0.3 + 0.6*inten; break;
+    case 'REST': case 'PAUSE': return 0.03;
+    case 'CONTRACT': { const ease = t < 0.3 ? t/0.3 : 1; return ease * inten; }
+    case 'RELEASE': return Math.max(0, (1-t)) * 0.6;
+    case 'HOLD': return inten;
     case 'PULSE': {
       const cyc = 1 / Math.max(1, step.count || 4);
       const local = (t % cyc) / cyc;
       const wave = local < 0.5 ? local*2 : (1-local)*2;
-      scale = REST_SCALE - (REST_SCALE-MIN_SCALE) * wave * inten;
-      glow = 0.25 + 0.6*wave; break;
+      return wave * inten;
     }
-    case 'RAMP_UP': {
-      const from = step.from != null ? step.from : 0, to = step.to != null ? step.to : 1;
-      const v = from + (to-from)*t;
-      scale = REST_SCALE - (REST_SCALE-MIN_SCALE) * v;
-      glow = 0.2 + 0.6*v; break;
-    }
-    case 'RAMP_DOWN': {
-      const from = step.from != null ? step.from : 1, to = step.to != null ? step.to : 0;
-      const v = from + (to-from)*t;
-      scale = REST_SCALE - (REST_SCALE-MIN_SCALE) * v;
-      glow = 0.2 + 0.6*v; break;
-    }
-    default: scale = REST_SCALE; restish = true;
+    case 'RAMP_UP': { const from = step.from!=null?step.from:0, to = step.to!=null?step.to:1; return from+(to-from)*t; }
+    case 'RAMP_DOWN': { const from = step.from!=null?step.from:1, to = step.to!=null?step.to:0; return from+(to-from)*t; }
+    default: return 0.03;
   }
-  return { scale, glow, restish };
 }
 
 class SessionEngine{
@@ -381,10 +454,6 @@ class SessionEngine{
   stop(){
     this.stopped = true;
     if(this._raf) cancelAnimationFrame(this._raf);
-    // Le tick programmé vient d'être annulé : il ne pourra jamais résoudre
-    // la promesse de l'étape en cours. On la résout donc nous-mêmes ici,
-    // sinon start() reste bloqué indéfiniment sur son "await" et onComplete
-    // n'est jamais appelé (la séance interrompue ne serait jamais enregistrée).
     if(this._pendingResolve){
       const r = this._pendingResolve;
       this._pendingResolve = null;
@@ -399,11 +468,8 @@ class SessionEngine{
       this._pausedAccum = 0;
       this._lastTick = -1;
       if(this.handlers.onStepStart) this.handlers.onStepStart(step, this.stepIndex, this.flat);
-      this._vibrateForStep(step);
-      const finish = () => {
-        this._pendingResolve = null;
-        resolve();
-      };
+      this._cueForStep(step);
+      const finish = () => { this._pendingResolve = null; resolve(); };
       const tick = () => {
         if(this.stopped){ finish(); return; }
         if(this.paused){ this._raf = requestAnimationFrame(tick); return; }
@@ -419,26 +485,26 @@ class SessionEngine{
   }
 
   _frame(step, t, elapsedInStep){
-    const info = computeVisual(step, t);
+    const glow = computeGlow(step, t);
     if(step.action === 'PULSE'){
       const cyc = step.duration / Math.max(1, step.count || 4);
       const tickIdx = Math.floor(elapsedInStep / cyc);
       if(tickIdx !== this._lastTick && (elapsedInStep % cyc) < cyc*0.5){
         this._lastTick = tickIdx;
-        vibrate(Math.round(60*(step.intensity || 0.6)) + 30);
+        cue('pulse-tick', step.intensity);
       }
     } else if(step.action === 'HOLD' && step.duration >= 2500){
       const period = 1500;
       const tickIdx = Math.floor(elapsedInStep / period);
       if(tickIdx > 0 && tickIdx !== this._lastTick && (elapsedInStep % period) < 40){
         this._lastTick = tickIdx;
-        vibrate(22);
+        cue('hold-tick');
       }
     }
     const elapsedTotal = this._elapsedTotalMs(elapsedInStep);
     if(this.handlers.onFrame){
       this.handlers.onFrame({
-        step, t, scale: info.scale, glow: info.glow, restish: info.restish,
+        step, t, glow,
         remainingStepMs: Math.max(0, step.duration - elapsedInStep),
         remainingTotalMs: Math.max(0, this.totalDuration - elapsedTotal),
         elapsedTotalMs: elapsedTotal,
@@ -453,9 +519,11 @@ class SessionEngine{
     return sum + Math.min(elapsedInStep, this.flat[this.stepIndex] ? this.flat[this.stepIndex].duration : 0);
   }
 
-  _vibrateForStep(step){
-    if(step.action === 'CONTRACT') vibrate(Math.round(140*(step.intensity || 0.6)) + 40);
-    else if(step.action === 'RAMP_UP') vibrate(30);
+  _cueForStep(step){
+    if(step.action === 'CONTRACT') cue('contract', step.intensity);
+    else if(step.action === 'RAMP_UP') cue('rampup', step.to);
+    else if(step.action === 'RELEASE') cue('release');
+    else if(step.action === 'PAUSE') cue('pause');
   }
 
   _done(reason){
@@ -463,14 +531,14 @@ class SessionEngine{
   }
 }
 
-/* ============ 5. UI — helpers génériques (toast, modale) ============ */
+/* ============ 7. UI — helpers génériques (toast, modale, mot de passe) ============ */
 function toast(msg){
   const root = document.getElementById('toastRoot');
   const el = document.createElement('div');
   el.className = 'toast';
   el.textContent = msg;
   root.appendChild(el);
-  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(() => el.remove(), 300); }, 2400);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .3s'; setTimeout(() => el.remove(), 300); }, 2600);
 }
 
 function openConfirmModal({ title, message, confirmLabel, cancelLabel, danger, onConfirm }){
@@ -508,25 +576,63 @@ function formatDateShort(ts){
 function estimateMinutes(ex){
   return Math.max(1, Math.round(flattenSteps(ex.steps).reduce((a,s)=>a+s.duration,0) / 60000));
 }
+function pwField(id, placeholder){
+  return `<div class="pw-field">
+    <input type="password" id="${id}" class="text-input" placeholder="${escapeHtml(placeholder)}" autocomplete="new-password">
+    <button type="button" class="pw-eye" data-target="${id}" aria-label="Afficher le mot de passe">${eyeSvg(false,18)}</button>
+  </div>`;
+}
+function showAuthError(msg){
+  // Affiche l'erreur sans tout re-rendre : un render() complet régénère les champs
+  // depuis le template HTML et efface ce que la personne venait de taper.
+  STATE.authError = msg;
+  const form = document.getElementById('signupForm') || document.getElementById('loginForm');
+  if(!form) return;
+  let el = form.querySelector('.form-error');
+  if(!el){
+    el = document.createElement('div');
+    el.className = 'form-error';
+    form.insertBefore(el, form.lastElementChild);
+  }
+  el.textContent = msg;
+}
+function wirePwEyes(){
+  document.querySelectorAll('.pw-eye').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const inp = document.getElementById(btn.getAttribute('data-target'));
+      if(!inp) return;
+      const willShow = inp.type === 'password';
+      inp.type = willShow ? 'text' : 'password';
+      btn.innerHTML = eyeSvg(!willShow, 18);
+      btn.setAttribute('aria-label', willShow ? 'Masquer le mot de passe' : 'Afficher le mot de passe');
+    });
+  });
+}
 
-/* ============ 6. ROUTAGE / RENDU ============ */
+/* ============ 8. ROUTAGE / RENDU ============ */
 const STATE = {
   view: 'welcome',
   qIndex: 0,
-  qAnswers: {}
+  qAnswers: {},
+  authError: ''
 };
 
 function navigate(view){ STATE.view = view; render(); window.scrollTo(0,0); }
 
 function render(){
   const app = document.getElementById('app');
+  const loggedIn = isLoggedIn();
   const profile = getProfile();
-  if(!profile && STATE.view !== 'welcome' && STATE.view !== 'questionnaire' && STATE.view !== 'results'){
-    STATE.view = 'welcome';
-  }
+
+  if(!loggedIn && !['welcome','login','signup'].includes(STATE.view)) STATE.view = 'welcome';
+  if(loggedIn && !profile && !['questionnaire','results'].includes(STATE.view)) STATE.view = 'questionnaire';
+  if(loggedIn && profile && ['welcome','login','signup'].includes(STATE.view)) STATE.view = 'dashboard';
+
   let html = '';
   switch(STATE.view){
     case 'welcome': html = renderWelcome(); break;
+    case 'signup': html = renderSignup(); break;
+    case 'login': html = renderLogin(); break;
     case 'questionnaire': html = renderQuestionnaire(); break;
     case 'results': html = renderResults(); break;
     case 'dashboard': html = renderDashboard(); break;
@@ -553,15 +659,75 @@ function renderBottomNav(){
     </button>`).join('')}</nav>`;
 }
 
+function renderDimBars(scores){
+  return DIMENSIONS.map(d => `
+    <div class="dim-row">
+      <div class="dim-ic">${dimIconSvg(d.key, 15)}</div>
+      <div class="dim-label">${d.label}</div>
+      <div class="dim-bar"><div class="dim-bar-fill" style="width:${scores[d.key]}%"></div></div>
+      <div class="dim-pct">${scores[d.key]}%</div>
+    </div>`).join('');
+}
+
 /* ---------- Écran d'accueil ---------- */
 function renderWelcome(){
   return `
   <div class="hero-screen screen">
     <div class="hero-mark">${brandMarkSvg(46)}</div>
     <h1>Kegel Control</h1>
-    <p>Un coaching guidé pour renforcer et rééduquer votre plancher pelvien : un court questionnaire, un programme qui s'adapte à vous, et des séances guidées pas à pas.</p>
-    <button class="btn btn-primary btn-block" id="startQuestionnaireBtn">Commencer le questionnaire</button>
-    <p class="hero-note">Ce prototype fonctionne entièrement sur votre appareil, sans compte ni connexion. Il ne remplace pas un avis médical : en cas de douleur ou de doute, consultez un professionnel de santé (sage-femme, kinésithérapeute spécialisé, médecin).</p>
+    <p>Un coaching guidé pour renforcer et rééduquer votre plancher pelvien : un court questionnaire, puis un exercice quotidien guidé pas à pas, deux fois par jour.</p>
+    <button class="btn btn-primary btn-block" id="goSignupBtn">Créer un compte</button>
+    <p class="auth-switch">Déjà un compte ? <button type="button" id="goLoginBtn">Se connecter</button></p>
+    <p class="hero-note">Ce prototype fonctionne entièrement sur votre appareil : il n'y a pas de serveur, vos données (y compris votre compte) restent uniquement sur ce téléphone. Il ne remplace pas un avis médical : en cas de douleur ou de doute, consultez un professionnel de santé (sage-femme, kinésithérapeute spécialisé, médecin).</p>
+  </div>`;
+}
+
+/* ---------- Inscription / Connexion ---------- */
+function renderSignup(){
+  return `
+  <div class="wrap screen">
+    <div class="hero-mark" style="margin:10px auto 18px;">${brandMarkSvg(34)}</div>
+    <div class="auth-title">Créer un compte</div>
+    <div class="auth-sub">Stocké uniquement sur cet appareil — aucun serveur.</div>
+    <form id="signupForm">
+      <div class="form-group">
+        <label class="form-label" for="signupEmail">Adresse e-mail</label>
+        <input type="email" id="signupEmail" class="text-input" placeholder="vous@exemple.com" autocomplete="email" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="signupPw">Mot de passe</label>
+        ${pwField('signupPw', '8 caractères minimum')}
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="signupPw2">Confirmer le mot de passe</label>
+        ${pwField('signupPw2', 'Retapez le mot de passe')}
+      </div>
+      ${STATE.authError ? `<div class="form-error">${escapeHtml(STATE.authError)}</div>` : ''}
+      <button type="submit" class="btn btn-primary btn-block">Créer mon compte</button>
+    </form>
+    <p class="auth-switch">Déjà un compte ? <button type="button" id="switchToLoginBtn">Se connecter</button></p>
+  </div>`;
+}
+
+function renderLogin(){
+  return `
+  <div class="wrap screen">
+    <div class="hero-mark" style="margin:10px auto 18px;">${brandMarkSvg(34)}</div>
+    <div class="auth-title">Se connecter</div>
+    <div class="auth-sub">Avec l'e-mail et le mot de passe de ce compte.</div>
+    <form id="loginForm">
+      <div class="form-group">
+        <label class="form-label" for="loginEmail">Adresse e-mail</label>
+        <input type="email" id="loginEmail" class="text-input" placeholder="vous@exemple.com" autocomplete="email" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label" for="loginPw">Mot de passe</label>
+        ${pwField('loginPw', 'Votre mot de passe')}
+      </div>
+      ${STATE.authError ? `<div class="form-error">${escapeHtml(STATE.authError)}</div>` : ''}
+      <button type="submit" class="btn btn-primary btn-block">Se connecter</button>
+    </form>
+    <p class="auth-switch">Pas encore de compte ? <button type="button" id="switchToSignupBtn">Créer un compte</button></p>
   </div>`;
 }
 
@@ -574,6 +740,7 @@ function renderQuestionnaire(){
   <div class="wrap screen">
     <div class="q-progress"><div class="q-progress-fill" style="width:${pct}%"></div></div>
     <span class="q-dim-tag">${DIM_LABEL[q.dim]} · ${STATE.qIndex+1}/${QUESTIONNAIRE.length}</span>
+    <p class="q-objective">${escapeHtml(DIM_OBJECTIVE[q.dim])}</p>
     <div class="q-text">${escapeHtml(q.text)}</div>
     <div class="q-options">
       ${SCALE_LABELS.map((lbl,i) => `
@@ -593,23 +760,15 @@ function renderResults(){
   const profile = getProfile();
   return `
   <div class="wrap screen">
-    <div class="topbar" style="padding-left:0;padding-right:0;">
-      <div class="brand"><div class="brand-mark">${brandMarkSvg(20)}</div><h1>Votre profil</h1></div>
-    </div>
+    <div class="topbar" style="padding-left:0;padding-right:0;"><h1>Votre profil</h1></div>
     <div class="card">
       <h2>Résultats du questionnaire</h2>
-      ${DIMENSIONS.map(d => `
-        <div class="dim-row">
-          <div class="dim-ic">${dimIconSvg(d.key, 15)}</div>
-          <div class="dim-label">${d.label}</div>
-          <div class="dim-bar"><div class="dim-bar-fill" style="width:${profile.scores[d.key]}%"></div></div>
-          <div class="dim-pct">${profile.scores[d.key]}%</div>
-        </div>`).join('')}
+      ${renderDimBars(profile.scores)}
     </div>
     <div class="card">
-      <h2>Votre programme</h2>
+      <h2>Votre exercice</h2>
       <p style="font-size:13px;color:var(--text-soft);line-height:1.55;">
-        Un programme sur ${TOTAL_WEEKS} semaines vient d'être créé à partir de ces résultats. Il commence au niveau adapté à chaque dimension, et évolue séance après séance en fonction de votre ressenti (difficulté, fatigue, douleur).
+        Un programme sur ${TOTAL_WEEKS} semaines vient d'être créé à partir de ces résultats. Chaque jour, deux séances identiques de l'Exercice de Kegel (6 types de contraction, environ ${estimateMinutes(KEGEL_EXERCISE)} minutes), espacées d'au moins 2h — sans exception, et sans rattrapage possible en cas de séance manquée.
       </p>
     </div>
     <button class="btn btn-primary btn-block" id="goDashboardBtn" style="margin-top:14px;">Voir mon programme</button>
@@ -619,44 +778,51 @@ function renderResults(){
 /* ---------- Tableau de bord ---------- */
 function renderDashboard(){
   const profile = getProfile();
-  const levels = getLevels();
-  const today = getTodayExercise();
-  const cooldown = canStartSession();
+  const level = getProgramLevel();
+  const cd = canStartSession();
   const wk = programWeekIndex();
-  const weekS = weekSessions(wk);
-  const completedThisWeek = weekS.filter(s => s.completed).length;
+  const todayCount = todaySessionsCount();
   const streak = currentStreak();
-  const painStreak = getPainStreak();
-  const painAlert = Object.entries(painStreak).find(([,v]) => v >= 2);
+  const painStreak = lsGet('programPainStreak', 0);
+  const days = currentWeekDayStatuses();
+  const dow = ['L','M','M','J','V','S','D'];
+
+  let todayCardBody;
+  if(todayCount >= DAILY_REQUIRED){
+    todayCardBody = `<div class="done-note">Les deux séances d'aujourd'hui sont terminées ✅ Revenez demain — il n'y a pas de séance supplémentaire ni de rattrapage.</div>`;
+  } else {
+    todayCardBody = `<p>${escapeHtml(KEGEL_EXERCISE.objective)} · ${estimateMinutes(KEGEL_EXERCISE)} min environ</p>` + (
+      cd.ok
+        ? `<button class="btn" id="startTodayBtn">Commencer la séance ${todayCount+1}/${DAILY_REQUIRED}</button>`
+        : `<div class="cooldown-note">Prochaine séance dans ${Math.ceil(cd.remainingMs/60000)} min (pause de 2h obligatoire entre les deux séances).</div>`
+    );
+  }
 
   return `
   <div class="wrap screen">
-    <div class="brand" style="margin-bottom:14px;">
-      <div class="brand-mark">${brandMarkSvg(20)}</div>
-      <div><div class="greet">Bonjour</div><div class="greet-sub" style="margin-bottom:0;">Semaine ${wk+1} / ${TOTAL_WEEKS}</div></div>
+    <div class="dash-header">
+      <div class="greet">Exercice de Kegel</div>
+      <div class="greet-sub">Semaine ${wk+1} / ${TOTAL_WEEKS}</div>
     </div>
 
-    ${painAlert ? `
+    ${painStreak >= 2 ? `
     <div class="card" style="border-color:rgba(229,72,77,.35);background:rgba(229,72,77,.06);margin-bottom:12px;">
       <div style="display:flex;gap:10px;align-items:flex-start;">
         <span style="font-size:18px;">⚠️</span>
         <p style="font-size:12.5px;line-height:1.55;color:#8a1f22;">
-          Une douleur a été signalée sur plusieurs séances récentes (${DIM_LABEL[painAlert[0]]}). La progression a été mise en pause sur cette dimension. Nous vous recommandons de consulter un professionnel de santé avant de continuer.
+          Une douleur a été signalée sur plusieurs séances récentes. La progression a été mise en pause. Nous vous recommandons de consulter un professionnel de santé avant de continuer.
         </p>
       </div>
     </div>` : ''}
 
     <div class="today-card">
-      <div class="tag">Séance du jour</div>
-      <h3>${escapeHtml(today.name)}</h3>
-      <p>${escapeHtml(today.objective)} · ${estimateMinutes(today)} min environ</p>
-      ${cooldown.ok
-        ? `<button class="btn" id="startTodayBtn" data-exo="${today.id}">Commencer la séance</button>`
-        : `<div class="cooldown-note">Prochaine séance disponible dans ${Math.ceil(cooldown.remainingMs/60000)} min (pause de 2h entre deux séances).</div>`}
+      <div class="tag">Séance ${Math.min(todayCount+1,DAILY_REQUIRED)}/${DAILY_REQUIRED} du jour · Niveau ${level}/4</div>
+      <h3>Exercice de Kegel</h3>
+      ${todayCardBody}
     </div>
 
     <div class="stat-grid">
-      <div class="stat-box"><div class="num">${completedThisWeek}/${SESSIONS_PER_WEEK}</div><div class="lbl">Séances cette semaine</div></div>
+      <div class="stat-box"><div class="num">${todayCount}/${DAILY_REQUIRED}</div><div class="lbl">Aujourd'hui</div></div>
       <div class="stat-box"><div class="num">${adherencePct()}%</div><div class="lbl">Assiduité globale</div></div>
       <div class="stat-box"><div class="num">${streak}</div><div class="lbl">Jours d'affilée</div></div>
       <div class="stat-box"><div class="num">${getSessions().filter(s=>s.completed).length}</div><div class="lbl">Séances au total</div></div>
@@ -664,56 +830,68 @@ function renderDashboard(){
 
     <div class="card">
       <h2>Cette semaine</h2>
-      <div class="week-dots">
-        ${Array.from({length:SESSIONS_PER_WEEK}).map((_,i) => `<div class="week-dot ${i<completedThisWeek?'done':''}">${i<completedThisWeek?'✓':i+1}</div>`).join('')}
+      <div class="day-pair-grid">
+        ${days.map((d,i) => `
+          <div class="day-pair ${d.isToday?'today':''}">
+            <div class="dow">${dow[i]}</div>
+            <div class="dots">
+              ${[0,1].map(slot => `<div class="day-dot ${slot<d.count?'done':(d.isFuture?'future':(d.isToday?'pending':'missed'))}"></div>`).join('')}
+            </div>
+          </div>`).join('')}
       </div>
     </div>
 
     <div class="card">
-      <h2>Vos dimensions</h2>
-      <div class="mini-dims">
-        ${DIMENSIONS.map(d => `
-          <div class="mini-dim-row">
-            <div class="dim-ic">${dimIconSvg(d.key, 14)}</div>
-            <div class="lbl">${d.label}</div>
-            <div class="lvl">${[1,2,3,4].map(n => `<div class="lvl-pip ${n<=levels[d.key]?'on':''}"></div>`).join('')}</div>
-          </div>`).join('')}
-      </div>
+      <h2>Votre profil initial</h2>
+      ${renderDimBars(profile.scores)}
     </div>
   </div>`;
 }
 
-/* ---------- Programme ---------- */
+/* ---------- Programme : vue d'ensemble 20 semaines, verrouillée tant que le jour n'est pas complet ---------- */
 function renderProgramme(){
   const wk = programWeekIndex();
-  const list = unlockedExercises();
+  const todayCount = todaySessionsCount();
+  const unlocked = todayCount >= DAILY_REQUIRED;
+
+  let weekGridHtml = '<div class="week-grid">';
+  for(let w=0; w<TOTAL_WEEKS; w++){
+    const isCurrent = w === programWeekIndex();
+    const isPast = w < programWeekIndex();
+    let cls = '';
+    if(isCurrent) cls = 'current';
+    else if(isPast){
+      const ratio = weekCompletionRatio(w);
+      cls = ratio >= 1 ? 'full' : (ratio > 0 ? 'partial' : '');
+    }
+    weekGridHtml += `<div class="week-cell ${cls}">${w+1}</div>`;
+  }
+  weekGridHtml += '</div>';
+
   return `
   <div class="wrap screen">
     <div class="topbar" style="padding-left:0;padding-right:0;">
       <h1>Programme</h1><span class="sub">Semaine ${wk+1}/${TOTAL_WEEKS}</span>
     </div>
     <div class="card">
-      <h2>Focus de la semaine</h2>
-      <p style="font-size:13px;color:var(--text-soft);line-height:1.55;">
-        ${SESSIONS_PER_WEEK} séances recommandées par semaine, choisies parmi les exercices débloqués ci-dessous, en priorité sur vos dimensions les plus faibles.
+      <h2>Vue d'ensemble (${TOTAL_WEEKS} semaines)</h2>
+      ${unlocked ? `
+        <p class="unlocked-note">Déverrouillé pour aujourd'hui ✅</p>
+        ${weekGridHtml}
+      ` : `
+        <div class="programme-lock-wrap">
+          <div class="week-grid-blur">${weekGridHtml}</div>
+          <div class="lock-banner">🔒 Validez vos ${DAILY_REQUIRED} séances du jour pour déverrouiller le programme complet (${todayCount}/${DAILY_REQUIRED} aujourd'hui)</div>
+        </div>
+      `}
+    </div>
+    <div class="card">
+      <h2>Principe</h2>
+      <p style="font-size:12.5px;color:var(--text-soft);line-height:1.6;">
+        Chaque jour, deux séances identiques de l'Exercice de Kegel (6 types de contraction, environ ${estimateMinutes(KEGEL_EXERCISE)} minutes), espacées d'au moins 2h. Une séance non faite dans la journée est définitivement manquée : il n'y a pas de rattrapage.
       </p>
+      <button class="btn btn-ghost btn-block" id="goDashFromProgBtn" style="margin-top:12px;">Voir l'exercice du jour</button>
     </div>
-    <div class="divider-label">Séance suggérée aujourd'hui</div>
-    ${renderExoItem(getTodayExercise(), true)}
-    <div class="divider-label">Bibliothèque d'exercices</div>
-    ${list.map(({ex,unlocked}) => renderExoItem(ex, unlocked)).join('')}
-  </div>`;
-}
-
-function renderExoItem(ex, unlocked){
-  return `
-  <div class="exo-item ${unlocked?'':'locked'}" ${unlocked?`data-exo="${ex.id}"`:''}>
-    <div class="exo-ic">${unlocked ? 'N'+ex.level : '🔒'}</div>
-    <div class="exo-info">
-      <div class="name">${escapeHtml(ex.name)}</div>
-      <div class="meta">${DIM_LABEL[ex.category]} · niveau ${ex.level} · ${estimateMinutes(ex)} min</div>
-    </div>
-    <div class="exo-go">${unlocked ? '›' : ''}</div>
   </div>`;
 }
 
@@ -723,15 +901,14 @@ function renderProgress(){
   const weeksBack = 8;
   const counts = [];
   for(let i=weeksBack-1;i>=0;i--){
-    const c = weekSessions(Math.max(0, programWeekIndex()-i)).filter(s=>s.completed).length;
-    counts.push(c);
+    counts.push(weekSessions(Math.max(0, programWeekIndex()-i)).length);
   }
-  const max = Math.max(1, ...counts);
+  const max = Math.max(1, DAILY_REQUIRED*7, ...counts);
   return `
   <div class="wrap screen">
     <div class="topbar" style="padding-left:0;padding-right:0;"><h1>Progrès</h1></div>
     <div class="card">
-      <h2>Séances complétées / semaine</h2>
+      <h2>Séances complétées / semaine (sur ${DAILY_REQUIRED*7})</h2>
       <div class="chart">
         ${counts.map(c => `<div class="chart-bar"><div class="fill" style="height:${Math.max(4,(c/max)*100)}%"></div></div>`).join('')}
       </div>
@@ -739,11 +916,11 @@ function renderProgress(){
     </div>
     <div class="card">
       <h2>Historique des séances</h2>
-      ${sessions.length===0 ? '<p class="empty-note">Aucune séance enregistrée pour l\'instant.</p>' : sessions.slice(0,40).map(s => `
+      ${sessions.length===0 ? '<p class="empty-note">Aucune séance enregistrée pour l\'instant.</p>' : sessions.slice(0,60).map(s => `
         <div class="hist-item">
           <div class="hist-date">${formatDateShort(s.date)}</div>
           <div class="hist-info">
-            <div class="name">${escapeHtml(s.exerciseName)}</div>
+            <div class="name">${escapeHtml(s.exerciseName || 'Exercice de Kegel')}</div>
             <div class="meta">${s.completed ? 'Terminée' : 'Interrompue'}${s.feedback ? ' · qualité ' + (s.feedback.quality+1) + '/5' : ''}</div>
           </div>
           ${s.feedback && s.feedback.pain>=2 ? '<span class="hist-flag" title="Douleur signalée">⚠️</span>' : ''}
@@ -754,37 +931,91 @@ function renderProgress(){
 
 /* ---------- Réglages ---------- */
 function renderSettings(){
+  const account = getAccount();
   return `
   <div class="wrap screen">
     <div class="topbar" style="padding-left:0;padding-right:0;"><h1>Réglages</h1></div>
     <div class="card">
       <div class="settings-row">
-        <div><div class="lbl">Refaire le questionnaire</div><div class="desc">Recalcule votre profil et vos niveaux de départ.</div></div>
+        <div><div class="lbl">Compte</div><div class="desc">${escapeHtml(account ? account.email : '—')}</div></div>
+      </div>
+      <div class="settings-row">
+        <div><div class="lbl">Son pendant la séance</div><div class="desc">Bips sonores en plus des vibrations (utiles sur iPhone, où les vibrations web ne fonctionnent pas).</div></div>
+        <button class="btn ${soundEnabled()?'btn-teal':'btn-ghost'} btn-sm" id="soundToggleBtn">${soundEnabled()?'Activé':'Désactivé'}</button>
+      </div>
+      <div class="settings-row">
+        <div><div class="lbl">Refaire le questionnaire</div><div class="desc">Recalcule votre profil et votre niveau de départ. L'historique est conservé.</div></div>
         <button class="btn btn-ghost btn-sm" id="retakeBtn">Refaire</button>
       </div>
       <div class="settings-row">
-        <div><div class="lbl">Réinitialiser les données</div><div class="desc">Efface le profil, le programme et l'historique de cet appareil.</div></div>
+        <div><div class="lbl">Réinitialiser les données</div><div class="desc">Efface le profil, le programme et l'historique de cet appareil (le compte est conservé).</div></div>
         <button class="btn btn-danger btn-sm" id="resetBtn">Réinitialiser</button>
+      </div>
+      <div class="settings-row">
+        <div><div class="lbl">Se déconnecter</div><div class="desc">Vos données restent sur cet appareil ; reconnectez-vous avec le même e-mail.</div></div>
+        <button class="btn btn-ghost btn-sm" id="logoutBtn">Déconnexion</button>
+      </div>
+      <div class="settings-row">
+        <div><div class="lbl">Supprimer mon compte</div><div class="desc">Efface définitivement le compte et toutes les données de cet appareil.</div></div>
+        <button class="btn btn-danger btn-sm" id="deleteAccountBtn">Supprimer</button>
       </div>
     </div>
     <div class="card">
       <h2>À propos</h2>
       <p class="disclaimer">
-        Kegel Control est un prototype d'entraînement du plancher pelvien fonctionnant entièrement sur cet appareil, sans compte ni envoi de données. Il propose un accompagnement progressif mais ne constitue pas un avis médical. En cas de douleur, d'incontinence sévère, de descente d'organe ou de doute, consultez un professionnel de santé (sage-femme, kinésithérapeute spécialisé en rééducation périnéale, médecin) avant de poursuivre.
+        Kegel Control est un prototype d'entraînement du plancher pelvien fonctionnant entièrement sur cet appareil, sans serveur. Il propose un accompagnement progressif mais ne constitue pas un avis médical. En cas de douleur, d'incontinence sévère, de descente d'organe ou de doute, consultez un professionnel de santé (sage-femme, kinésithérapeute spécialisé en rééducation périnéale, médecin) avant de poursuivre.
       </p>
     </div>
   </div>`;
 }
 
-/* ============ 7. ÉVÉNEMENTS DE VUE ============ */
+/* ============ 9. ÉVÉNEMENTS DE VUE ============ */
 function wireView(){
   document.querySelectorAll('[data-nav]').forEach(btn => {
     btn.addEventListener('click', () => navigate(btn.getAttribute('data-nav')));
   });
 
   if(STATE.view === 'welcome'){
-    const b = document.getElementById('startQuestionnaireBtn');
-    if(b) b.addEventListener('click', () => { STATE.qIndex=0; STATE.qAnswers={}; navigate('questionnaire'); });
+    document.getElementById('goSignupBtn').addEventListener('click', () => { STATE.authError=''; navigate('signup'); });
+    document.getElementById('goLoginBtn').addEventListener('click', () => { STATE.authError=''; navigate('login'); });
+  }
+
+  if(STATE.view === 'signup'){
+    wirePwEyes();
+    document.getElementById('switchToLoginBtn').addEventListener('click', () => { STATE.authError=''; navigate('login'); });
+    document.getElementById('signupForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('signupEmail').value.trim().toLowerCase();
+      const pw = document.getElementById('signupPw').value;
+      const pw2 = document.getElementById('signupPw2').value;
+      if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ showAuthError('Adresse e-mail invalide.'); return; }
+      if(pw.length < 8){ showAuthError('Le mot de passe doit contenir au moins 8 caractères.'); return; }
+      if(pw !== pw2){ showAuthError('Les deux mots de passe ne correspondent pas.'); return; }
+      if(getAccount()){ showAuthError('Un compte existe déjà sur cet appareil. Connectez-vous.'); return; }
+      const hash = await hashPassword(pw);
+      lsSet('account', { email, hash, createdAt: Date.now() });
+      lsSet('loggedIn', true);
+      STATE.authError = '';
+      toast('Compte créé ✅');
+      navigate(getProfile() ? 'dashboard' : 'questionnaire');
+    });
+  }
+
+  if(STATE.view === 'login'){
+    wirePwEyes();
+    document.getElementById('switchToSignupBtn').addEventListener('click', () => { STATE.authError=''; navigate('signup'); });
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = document.getElementById('loginEmail').value.trim().toLowerCase();
+      const pw = document.getElementById('loginPw').value;
+      const account = getAccount();
+      if(!account){ showAuthError('Aucun compte trouvé sur cet appareil. Créez-en un.'); return; }
+      const hash = await hashPassword(pw);
+      if(account.email !== email || account.hash !== hash){ showAuthError('E-mail ou mot de passe incorrect.'); return; }
+      lsSet('loggedIn', true);
+      STATE.authError = '';
+      navigate(getProfile() ? 'dashboard' : 'questionnaire');
+    });
   }
 
   if(STATE.view === 'questionnaire'){
@@ -805,63 +1036,81 @@ function wireView(){
   }
 
   if(STATE.view === 'results'){
-    const b = document.getElementById('goDashboardBtn');
-    if(b) b.addEventListener('click', () => navigate('dashboard'));
+    document.getElementById('goDashboardBtn').addEventListener('click', () => navigate('dashboard'));
   }
 
   if(STATE.view === 'dashboard'){
     const b = document.getElementById('startTodayBtn');
-    if(b) b.addEventListener('click', () => launchSession(b.getAttribute('data-exo')));
+    if(b) b.addEventListener('click', () => launchSession());
   }
 
   if(STATE.view === 'programme'){
-    document.querySelectorAll('.exo-item[data-exo]').forEach(el => {
-      el.addEventListener('click', () => {
-        const cd = canStartSession();
-        if(!cd.ok){ toast(`Pause requise : encore ${Math.ceil(cd.remainingMs/60000)} min avant la prochaine séance.`); return; }
-        launchSession(el.getAttribute('data-exo'));
-      });
-    });
+    const b = document.getElementById('goDashFromProgBtn');
+    if(b) b.addEventListener('click', () => navigate('dashboard'));
   }
 
   if(STATE.view === 'settings'){
-    const retake = document.getElementById('retakeBtn');
-    if(retake) retake.addEventListener('click', () => {
+    document.getElementById('soundToggleBtn').addEventListener('click', () => { setSoundEnabled(!soundEnabled()); render(); });
+
+    document.getElementById('retakeBtn').addEventListener('click', () => {
       openConfirmModal({
         title: 'Refaire le questionnaire ?',
-        message: "Votre profil et vos niveaux de départ seront recalculés. L'historique de vos séances est conservé.",
+        message: "Votre profil et votre niveau de départ seront recalculés. L'historique de vos séances est conservé.",
         confirmLabel: 'Refaire',
         onConfirm: () => { STATE.qIndex=0; STATE.qAnswers={}; navigate('questionnaire'); }
       });
     });
-    const reset = document.getElementById('resetBtn');
-    if(reset) reset.addEventListener('click', () => {
+
+    document.getElementById('resetBtn').addEventListener('click', () => {
       openConfirmModal({
         title: 'Réinitialiser toutes les données ?',
-        message: "Cette action efface définitivement votre profil, votre programme et l'historique de vos séances sur cet appareil. Elle est irréversible.",
+        message: "Cette action efface définitivement votre profil, votre programme et l'historique de vos séances sur cet appareil (votre compte reste actif). Elle est irréversible.",
         confirmLabel: 'Réinitialiser',
         danger: true,
-        onConfirm: () => { lsRemoveAll(); toast('Données réinitialisées'); navigate('welcome'); }
+        onConfirm: () => {
+          lsRemoveExcept(['account','loggedIn','soundOn']);
+          STATE.qIndex=0; STATE.qAnswers={};
+          toast('Données réinitialisées');
+          navigate('questionnaire');
+        }
+      });
+    });
+
+    document.getElementById('logoutBtn').addEventListener('click', () => {
+      lsSet('loggedIn', false);
+      navigate('login');
+    });
+
+    document.getElementById('deleteAccountBtn').addEventListener('click', () => {
+      openConfirmModal({
+        title: 'Supprimer votre compte ?',
+        message: "Cette action efface définitivement votre compte et toutes vos données sur cet appareil. Elle est irréversible.",
+        confirmLabel: 'Supprimer',
+        danger: true,
+        onConfirm: () => { lsRemoveAll(); toast('Compte supprimé'); navigate('welcome'); }
       });
     });
   }
 }
 
-/* ============ 8. ÉCRAN DE SÉANCE GUIDÉE ============ */
+/* ============ 10. ÉCRAN DE SÉANCE GUIDÉE ============ */
 let activeEngine = null;
 
-function launchSession(exerciseId){
+function launchSession(){
   const cd = canStartSession();
-  if(!cd.ok){ toast(`Pause requise : encore ${Math.ceil(cd.remainingMs/60000)} min avant la prochaine séance.`); return; }
-  const ex = EXERCISES.find(e => e.id === exerciseId);
-  if(!ex) return;
-  renderSessionShell(ex);
-  const engine = new SessionEngine(ex, {
+  if(!cd.ok){
+    if(cd.reason === 'done') toast('Vos 2 séances du jour sont déjà terminées.');
+    else toast(`Pause requise : encore ${Math.ceil(cd.remainingMs/60000)} min avant la prochaine séance.`);
+    return;
+  }
+  ensureAudioCtx(); // créé/débloqué ici, sur un vrai geste utilisateur (requis par iOS Safari)
+  renderSessionShell(KEGEL_EXERCISE);
+  const engine = new SessionEngine(KEGEL_EXERCISE, {
     onStepStart: (step) => updateSessionPhase(step),
     onFrame: (info) => updateSessionFrame(info),
     onPause: () => setSessionButtonState(true),
     onResume: () => setSessionButtonState(false),
-    onComplete: (reason) => onSessionComplete(ex, reason)
+    onComplete: (reason) => onSessionComplete(reason)
   });
   activeEngine = engine;
   engine.start();
@@ -877,17 +1126,17 @@ function renderSessionShell(ex){
       <button class="session-close" id="sessionCloseBtn">✕</button>
     </div>
     <div class="session-mid">
-      <div class="session-timer" id="sessionTimer">${formatMMSS(flat.reduce((a,s)=>a+s.duration,0))}</div>
-      <div class="session-phase" id="sessionPhase">Préparation</div>
+      <div class="session-type" id="sessionType">Préparation</div>
+      <div class="session-phase" id="sessionPhase"></div>
       <div class="circle-wrap">
-        <div class="circle-ring"></div>
-        <div class="circle-core rest" id="sessionCircle"></div>
+        <div class="circle-outline" id="sessionCircle"></div>
+        <div class="circle-count" id="sessionCount">–</div>
       </div>
-      <div class="session-sets" id="sessionSets"></div>
+      <div class="session-total-remaining" id="sessionTotalRemaining">Temps restant : ${formatMMSS(flat.reduce((a,s)=>a+s.duration,0))}</div>
     </div>
     <div class="timeline-wrap">
       <div class="timeline" id="sessionTimeline">
-        ${flat.map((s,i) => `<div class="tl-step ${s.action==='REST'?'rest-step':''}" data-idx="${i}"></div>`).join('')}
+        ${flat.map((s,i) => `<div class="tl-step ${s.action==='REST'?'rest-step':''} ${s.action==='PAUSE'?'pause-step':''}" data-idx="${i}"></div>`).join('')}
       </div>
     </div>
     <div class="session-bottom">
@@ -918,20 +1167,28 @@ function setSessionButtonState(paused){
 }
 
 function updateSessionPhase(step){
+  const typeEl = document.getElementById('sessionType');
   const phaseEl = document.getElementById('sessionPhase');
+  if(typeEl){
+    typeEl.textContent = step.action === 'PAUSE'
+      ? `Pause · avant type ${(step.typeIndex ?? 0) + 2}/${CONTRACTION_TYPES.length}`
+      : `Type ${(step.typeIndex ?? 0) + 1}/${CONTRACTION_TYPES.length} · ${step.typeName || ''}`;
+  }
   if(phaseEl) phaseEl.textContent = STEP_LABELS[step.action] || step.action;
 }
 
 function updateSessionFrame(info){
-  const timerEl = document.getElementById('sessionTimer');
+  const countEl = document.getElementById('sessionCount');
   const circleEl = document.getElementById('sessionCircle');
+  const totalEl = document.getElementById('sessionTotalRemaining');
   const timeline = document.getElementById('sessionTimeline');
-  if(timerEl) timerEl.textContent = formatMMSS(info.remainingTotalMs);
+  if(countEl) countEl.textContent = Math.max(1, Math.ceil(info.remainingStepMs/1000));
   if(circleEl){
-    circleEl.style.transform = `scale(${info.scale.toFixed(3)})`;
-    circleEl.classList.toggle('rest', info.restish);
-    circleEl.style.boxShadow = info.restish ? 'none' : `0 0 ${Math.round(20+60*info.glow)}px rgba(108,99,255,${(0.3+0.6*info.glow).toFixed(2)})`;
+    const spread = Math.round(2 + 16*info.glow);
+    const alpha = (0.12 + 0.55*info.glow).toFixed(2);
+    circleEl.style.boxShadow = `0 0 0 ${spread}px rgba(221,31,47,${alpha})`;
   }
+  if(totalEl) totalEl.textContent = `Temps restant : ${formatMMSS(info.remainingTotalMs)}`;
   if(timeline && activeEngine){
     const nodes = timeline.querySelectorAll('.tl-step');
     nodes.forEach((n,i) => {
@@ -943,30 +1200,22 @@ function updateSessionFrame(info){
   }
 }
 
-function onSessionComplete(ex, reason){
-  const record = {
-    id: 'sess_' + Date.now(),
-    exerciseId: ex.id,
-    exerciseName: ex.name,
-    category: ex.category,
-    date: Date.now(),
-    completed: reason === 'completed'
-  };
-  lsSet('lastSessionEnd', Date.now());
+function onSessionComplete(reason){
   if(reason === 'completed'){
+    cue('finish');
     document.getElementById('sessionRoot').innerHTML = '';
-    showFeedbackScreen(ex, record);
+    showFeedbackScreen();
   } else {
-    addSessionRecord(record);
+    addSessionRecord({ id:'sess_'+Date.now(), exerciseName: KEGEL_EXERCISE.name, date: Date.now(), completed:false });
     document.getElementById('sessionRoot').innerHTML = '';
     activeEngine = null;
     render();
-    toast('Séance interrompue — enregistrée comme incomplète');
+    toast('Séance interrompue — non comptabilisée, vous pouvez recommencer.');
   }
 }
 
-/* ---------- Feedback post-séance ---------- */
-function showFeedbackScreen(ex, record){
+/* ---------- Feedback post-séance — une seule fois, après l'exercice complet ---------- */
+function showFeedbackScreen(){
   const fb = { difficulty:2, fatigue:2, quality:3, relaxation:3, pain:0 };
   const root = document.getElementById('sessionRoot');
 
@@ -975,7 +1224,7 @@ function showFeedbackScreen(ex, record){
     <div class="session-overlay" style="background:var(--bg);color:var(--text);">
       <div class="fb-wrap">
         <h1 style="font-size:19px;font-weight:800;margin-bottom:2px;">Séance terminée 🎉</h1>
-        <p style="font-size:13px;color:var(--text-soft);margin-bottom:22px;">${escapeHtml(ex.name)} — quelques questions pour ajuster la suite de votre programme.</p>
+        <p style="font-size:13px;color:var(--text-soft);margin-bottom:22px;">Exercice de Kegel complet — quelques questions pour ajuster la suite de votre programme.</p>
 
         ${fbScale('difficulty','Difficulté ressentie', ['Trop facile','Facile','Adaptée','Difficile','Trop difficile'], fb.difficulty)}
         ${fbScale('fatigue','Fatigue musculaire', ['Aucune','Légère','Modérée','Forte','Épuisante'], fb.fatigue)}
@@ -986,7 +1235,7 @@ function showFeedbackScreen(ex, record){
         ${fb.pain>=2 ? `
         <div class="safety-banner">
           <span class="ic">⚠️</span>
-          <p>Une douleur modérée à forte a été signalée. Pour votre sécurité, la progression sera mise en pause sur cette dimension. Si la douleur persiste, nous vous recommandons de consulter un professionnel de santé avant de poursuivre les séances.</p>
+          <p>Une douleur modérée à forte a été signalée. Pour votre sécurité, la progression sera mise en pause. Si la douleur persiste, nous vous recommandons de consulter un professionnel de santé avant de poursuivre les séances.</p>
         </div>` : ''}
 
         <button class="btn btn-primary btn-block" id="fbSubmitBtn">Valider</button>
@@ -1000,7 +1249,7 @@ function showFeedbackScreen(ex, record){
         draw();
       });
     });
-    document.getElementById('fbSubmitBtn').addEventListener('click', () => submitFeedback(ex, record, fb));
+    document.getElementById('fbSubmitBtn').addEventListener('click', () => submitFeedback(fb));
   }
 
   function fbScale(field, label, labels, val, isPain){
@@ -1016,40 +1265,44 @@ function showFeedbackScreen(ex, record){
   draw();
 }
 
-function submitFeedback(ex, record, fb){
-  record.feedback = fb;
-  record.painFlag = fb.pain >= 2;
+function submitFeedback(fb){
+  const record = {
+    id: 'sess_' + Date.now(),
+    exerciseName: KEGEL_EXERCISE.name,
+    date: Date.now(),
+    completed: true,
+    feedback: fb,
+    painFlag: fb.pain >= 2
+  };
   addSessionRecord(record);
+  lsSet('lastSessionEnd', Date.now());
 
-  const levels = getLevels();
-  const painStreak = getPainStreak();
-  const cat = ex.category;
-
+  let level = getProgramLevel();
+  let painStreak = lsGet('programPainStreak', 0);
   if(record.painFlag){
-    levels[cat] = Math.max(1, levels[cat] - 1);
-    painStreak[cat] = (painStreak[cat] || 0) + 1;
+    level = Math.max(1, level - 1);
+    painStreak += 1;
   } else {
-    painStreak[cat] = 0;
-    if(fb.difficulty <= 1 && fb.quality >= 3 && fb.fatigue <= 2){
-      levels[cat] = Math.min(4, levels[cat] + 1);
-    }
+    painStreak = 0;
+    if(fb.difficulty <= 1 && fb.quality >= 3 && fb.fatigue <= 2) level = Math.min(4, level + 1);
   }
-  setLevels(levels);
-  setPainStreak(painStreak);
+  setProgramLevel(level);
+  lsSet('programPainStreak', painStreak);
 
   document.getElementById('sessionRoot').innerHTML = '';
   activeEngine = null;
   navigate('dashboard');
   toast(record.painFlag ? 'Séance enregistrée — douleur notée' : 'Séance enregistrée ✅');
-  if(painStreak[cat] >= 2){
-    setTimeout(() => toast('⚠️ Pensez à consulter un professionnel de santé'), 1200);
+  if(painStreak >= 2){
+    setTimeout(() => toast('⚠️ Pensez à consulter un professionnel de santé'), 1300);
   }
 }
 
-/* ============ 9. INITIALISATION ============ */
+/* ============ 11. INITIALISATION ============ */
 function init(){
+  const loggedIn = isLoggedIn();
   const profile = getProfile();
-  STATE.view = profile ? 'dashboard' : 'welcome';
+  STATE.view = !loggedIn ? 'welcome' : (!profile ? 'questionnaire' : 'dashboard');
   render();
 
   if('serviceWorker' in navigator){
