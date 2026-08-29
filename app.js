@@ -129,16 +129,21 @@ const QUESTIONNAIRE = [
   { id:'a3', dim:'arousalControl', text:"Dans un moment de forte intensité physique ou émotionnelle, je garde une sensation de contrôle sur mon plancher pelvien plutôt que de le sentir m'échapper." }
 ];
 
-/* ============ 4. L'EXERCICE DE KEGEL — 3 phases, quotidien, x2/jour, roulement hebdo ============
+/* ============ 4. L'EXERCICE DE KEGEL — 3 MODULES, quotidien, x2/jour, roulement hebdo ============
    Moteur piloté par données. Types d'étape reconnus :
-     CONTRACT / RELEASE / REST / HOLD / PULSE / RAMP_UP / RAMP_DOWN / LOOP / PAUSE
-   Structure d'une séance : Phase 1 « Contractions » (6 types, tirés d'une réserve de
-   10 et qui tournent chaque semaine — 2 retirés / 2 ajoutés — voir plus bas), puis
-   Phase 2 « Respiration », puis Phase 3 « Relâchement final ». Des pauses de 9s
-   ("Repos") séparent chaque bloc ; les relâchements À L'INTÉRIEUR d'un bloc
-   s'appellent "Relâcher". Les 6 durées des blocs de contraction restent FIXES d'une
-   semaine à l'autre (45/60/65/69/45/63 s, 347s au total) : seul le TYPE de
-   contraction affecté à chaque durée change, donc le temps d'exercice ne bouge pas. */
+     CONTRACT / RELEASE / REST / HOLD / PULSE / RAMP_UP / RAMP_DOWN / LOOP / PAUSE / CHECKPOINT
+   Structure d'une séance : Module 1 « Contraction » (6 types, tirés d'une réserve de
+   10 et qui tournent chaque semaine — 2 retirés / 2 ajoutés — voir plus bas), un
+   CHECKPOINT (propose de continuer ou de faire une pause), puis Module 2
+   « Respiration » (1 technique parmi 4, qui tourne chaque semaine), un second
+   CHECKPOINT, puis Module 3 « Contrôle de l'excitation » (3 exercices tirés d'une
+   réserve de 6, qui tournent aussi chaque semaine, deux d'entre eux avec une tenue
+   qui s'allonge progressivement). Des pauses de 9s ("Repos") séparent chaque bloc ;
+   les relâchements À L'INTÉRIEUR d'un bloc s'appellent "Relâcher". Les 6 durées des
+   blocs de contraction restent FIXES d'une semaine à l'autre (45/60/65/69/45/63 s,
+   347s au total) : seul le TYPE de contraction affecté à chaque durée change, donc
+   le temps d'exercice du module 1 ne bouge pas (idem pour les modules 2 et 3, sur
+   leurs propres durées fixes). */
 const PAUSE_BETWEEN_TYPES_MS = 9000;
 
 // Construit une boucle de `unit` (motif de base, en durées nominales "durMs") pour
@@ -224,27 +229,103 @@ function weeklyContractionIds(weekIdx){
   return ids;
 }
 
-// Phase 2 — Respiration : 4 cycles fixes de 14s (inspiration/engagement doux 4s,
-// maintien léger 2s, expiration/relâchement 6s, repos 2s sans son ni halo).
-const BREATHING_UNIT = [
-  { action:'RAMP_UP', durMs:4000, from:0, to:0.4 },
-  { action:'HOLD', durMs:2000, intensity:0.4 },
-  { action:'RAMP_DOWN', durMs:6000, from:0.4, to:0 },
-  { action:'REST', durMs:2000 }
-];
+/* ---- Module 2 — Respiration ---------------------------------------------------
+   4 techniques de respiration réelles, une par semaine (rotation simple : pratiquer
+   UNE technique de façon cohérente pendant la séance, comme en pratique clinique,
+   plutôt que d'en mélanger plusieurs). Le halo/le son suivent le même signal que
+   pour les contractions, mais avec une amplitude volontairement plus douce (on
+   "sent" la respiration, on ne "serre" pas) : inspiration = REST (aucune tension,
+   le plancher pelvien s'allonge), expiration = légère montée/descente (le plancher
+   pelvien remonte doucement), conformément à la coordination souffle/plancher
+   pelvien décrite en rééducation pelvienne. */
+const BREATHING_POOL = {
+  'diaphragmatic-55': { name:'Respiration diaphragmatique 5-5', unit:[
+    { action:'REST', durMs:5000 },
+    { action:'RAMP_UP', durMs:2500, from:0, to:0.35 },
+    { action:'RAMP_DOWN', durMs:2500, from:0.35, to:0 }
+  ]}, // inspire 5s (ventre qui se gonfle) / expire 5s (légère remontée du plancher pelvien) — Hinge Health / APTA Pelvic Health
+  'box-4444': { name:'Respiration carrée 4-4-4-4', unit:[
+    { action:'REST', durMs:4000 },
+    { action:'RAMP_UP', durMs:800, from:0, to:0.3 }, { action:'HOLD', durMs:3200, intensity:0.3 },
+    { action:'RAMP_DOWN', durMs:4000, from:0.3, to:0 },
+    { action:'REST', durMs:4000 }
+  ]}, // inspire 4s / retenue 4s / expire 4s / retenue poumons vides 4s — "box breathing", régulation du système nerveux autonome
+  '478': { name:'Respiration 4-7-8', unit:[
+    { action:'REST', durMs:4000 },
+    { action:'HOLD', durMs:7000, intensity:0.3 },
+    { action:'RAMP_DOWN', durMs:8000, from:0.3, to:0 }
+  ]}, // inspire 4s (nez) / retenue 7s / expire longue 8s (bouche) — méthode 4-7-8, le ratio compte plus que la durée exacte
+  'coherent-55': { name:'Respiration cohérente (~5,5/min)', unit:[
+    { action:'REST', durMs:5500 },
+    { action:'RAMP_UP', durMs:1800, from:0, to:0.3 }, { action:'RAMP_DOWN', durMs:3700, from:0.3, to:0 }
+  ]} // ~5,5 cycles/minute — respiration de cohérence cardiaque, favorise la régulation du système nerveux autonome
+};
+const BREATHING_POOL_ORDER = ['diaphragmatic-55','box-4444','478','coherent-55'];
 const BREATHING_TARGET_MS = 56000;
+function weeklyBreathingId(weekIdx){ return BREATHING_POOL_ORDER[weekIdx % BREATHING_POOL_ORDER.length]; }
 
-// Phase 3 — Relâchement final : 2 cycles fixes de 15s, lents et doux, pour terminer
-// la séance sur un relâchement complet plutôt que sur un effort.
-const FINAL_UNIT = [
-  { action:'RAMP_UP', durMs:3000, from:0, to:0.5 },
-  { action:'HOLD', durMs:3000, intensity:0.5 },
-  { action:'RELEASE', durMs:6000, intensity:0.5 },
-  { action:'REST', durMs:3000 }
-];
-const FINAL_TARGET_MS = 30000;
+/* ---- Module 3 — Contrôle de l'excitation ---------------------------------------
+   Exercices informels inspirés de techniques comportementales reconnues pour le
+   contrôle éjaculatoire — le "stop-start" (méthode Semans), la "squeeze technique"
+   (Masters & Johnson) et l'entraînement du plancher pelvien pour ce même objectif
+   (contractions rapides, tenues qui s'allongent progressivement sur plusieurs
+   semaines). L'app ne simule pas d'activité sexuelle : elle entraîne le geste
+   musculaire (serrage ferme, tenue, relâchement, rythme monter/stopper) que ces
+   techniques utilisent, à appliquer ensuite dans la pratique réelle (seul ou en
+   couple). Comme le module 1, la sélection tourne chaque semaine (fenêtre de 3 sur
+   une réserve de 6) et deux exercices (tenue progressive, compression) voient leur
+   temps de tenue s'allonger avec les semaines — écho direct à la progression citée
+   dans la littérature (isolation semaines 1-2, force semaines 2-4, tenues prolongées
+   semaines 8-12). Purement informel, non médical — comme précisé au questionnaire. */
+const EXCITATION_POOL = {
+  'quick-control': { name:'Contractions rapides de contrôle', category:'excitation', unit:[
+    { action:'PULSE', durMs:5000, count:10, intensity:1 }, { action:'RELEASE', durMs:2000, intensity:1 }
+  ]}, // 10 contractions rapides — le volet "quick contractions" de l'entraînement PFM pour l'éjaculation
+  'compression': { name:'Compression', category:'excitation', unit:[
+    { action:'CONTRACT', durMs:1500, intensity:1 }, { action:'HOLD', durMs:8000, intensity:1 },
+    { action:'RELEASE', durMs:4000, intensity:1 }, { action:'REST', durMs:4000 }
+  ]}, // inspiré de la squeeze technique : serrage ferme et soutenu, puis relâchement complet et pause
+  'stop-go': { name:'Stop & Go', category:'excitation', unit:[
+    { action:'RAMP_UP', durMs:6000, from:0, to:1 }, { action:'HOLD', durMs:1500, intensity:1 },
+    { action:'RELEASE', durMs:1500, intensity:1 }, { action:'REST', durMs:9000 }
+  ]}, // rythme du "stop-start" (Semans) : montée en intensité puis arrêt complet, le temps que ça redescende
+  'progressive-hold': { name:'Tenue progressive', category:'excitation', unit:[
+    { action:'RAMP_UP', durMs:1500, from:0, to:1 }, { action:'HOLD', durMs:5000, intensity:1 },
+    { action:'RELEASE', durMs:2500, intensity:1 }, { action:'REST', durMs:2000 }
+  ]}, // la tenue s'allonge de semaine en semaine (voir excitationUnitFor)
+  'plateau': { name:'Plateau maîtrisé', category:'excitation', unit:[
+    { action:'RAMP_UP', durMs:4000, from:0, to:1 }, { action:'HOLD', durMs:6000, intensity:1 },
+    { action:'RAMP_DOWN', durMs:4000, from:1, to:0 }
+  ]}, // rester "en haut" sans redescendre brutalement : la maîtrise du plateau plutôt que le pic
+  'breath-anchor': { name:'Ancrage respiratoire', category:'excitation', unit:[
+    { action:'REST', durMs:4000 }, { action:'CONTRACT', durMs:1000, intensity:0.7 },
+    { action:'HOLD', durMs:3000, intensity:0.7 }, { action:'RELEASE', durMs:3000, intensity:0.7 }
+  ]} // respire profondément (facteur clé cité pour le stop-start, active le système parasympathique) puis freine doucement
+};
+const EXCITATION_POOL_ORDER = ['quick-control','compression','stop-go','progressive-hold','plateau','breath-anchor'];
+const EXCITATION_SLOT_DURATIONS_MS = [30000, 30000, 30000];
+function weeklyExcitationIds(weekIdx){
+  const n = EXCITATION_POOL_ORDER.length;
+  const offset = weekIdx % n;
+  const ids = [];
+  for(let i=0;i<3;i++) ids.push(EXCITATION_POOL_ORDER[(offset + i) % n]);
+  return ids;
+}
+function excitationUnitFor(id, weekIdx){
+  const def = EXCITATION_POOL[id];
+  const growth = Math.min(1, weekIdx / 16); // atteint son maximum vers la semaine 17
+  if(id === 'progressive-hold'){
+    const holdMs = Math.round(5000 + growth * 5000); // 5s (semaine 1) -> jusqu'à 10s
+    return def.unit.map(s => s.action === 'HOLD' ? Object.assign({}, s, { durMs: holdMs }) : s);
+  }
+  if(id === 'compression'){
+    const holdMs = Math.round(8000 + growth * 4000); // 8s -> jusqu'à 12s
+    return def.unit.map(s => s.action === 'HOLD' ? Object.assign({}, s, { durMs: holdMs }) : s);
+  }
+  return def.unit;
+}
 
-function appendBlock(steps, segments, name, category, flatSteps){
+function appendBlock(steps, segments, name, category, flatSteps, moduleIdx){
   const blockTotalMs = flatSteps.reduce((a,s) => a + s.duration, 0);
   const blockId = segments.filter(s => s.kind === 'block').length;
   const segIndex = segments.length;
@@ -254,64 +335,129 @@ function appendBlock(steps, segments, name, category, flatSteps){
     const remainingInBlockAtStepStart = cursor;
     cursor -= s.duration;
     steps.push(Object.assign({}, s, {
-      blockId, blockPos: blockId + 1, typeName: name, typeCategory: category,
+      blockId, blockPos: blockId + 1, typeName: name, typeCategory: category, moduleIdx,
       blockTotalMs, remainingInBlockAtStepStart, segIndex, blockStart: si === 0
     }));
   });
 }
-function appendPause(steps, segments, blockPos, typeName, typeCategory){
+function appendPause(steps, segments, blockPos, typeName, typeCategory, moduleIdx){
   const segIndex = segments.length;
   segments.push({ kind:'pause', name:'Repos' });
   steps.push({
     action:'PAUSE', duration: PAUSE_BETWEEN_TYPES_MS,
-    blockId: blockPos - 1, blockPos, typeName, typeCategory,
+    blockId: blockPos - 1, blockPos, typeName, typeCategory, moduleIdx,
     blockTotalMs: PAUSE_BETWEEN_TYPES_MS, remainingInBlockAtStepStart: PAUSE_BETWEEN_TYPES_MS,
     segIndex, blockStart:false
+  });
+}
+/* Point de synchronisation entre deux modules : durée 0, le moteur s'arrête et
+   attend une décision explicite de l'utilisateur (voir SessionEngine.continueFromCheckpoint)
+   plutôt que de continuer automatiquement — "on te propose de continuer ou de mettre
+   une pause avant de passer au module suivant". */
+function appendCheckpoint(steps, segments, moduleFrom, moduleTo, fromName, toName){
+  const segIndex = Math.max(0, segments.length - 1);
+  steps.push({
+    action:'CHECKPOINT', duration:0, moduleFrom, moduleTo, fromName, toName,
+    blockId:-1, blockPos:0, typeName:'', typeCategory:'checkpoint', moduleIdx: moduleFrom,
+    blockTotalMs:0, remainingInBlockAtStepStart:0, segIndex, blockStart:false
   });
 }
 
 function buildFullExercise(weekIdx){
   const steps = [], segments = [];
+
+  // ---- Module 1 : Contraction (Kegel) ----
   const ids = weeklyContractionIds(weekIdx);
   ids.forEach((id, i) => {
     const def = CONTRACTION_POOL[id];
     const flat = buildLoopToExact(def.unit, SLOT_DURATIONS_MS[i]);
-    appendBlock(steps, segments, def.name, def.category, flat);
-    appendPause(steps, segments, i + 1, def.name, def.category);
+    appendBlock(steps, segments, def.name, def.category, flat, 1);
+    appendPause(steps, segments, i + 1, def.name, def.category, 1);
   });
-  const breathFlat = buildLoopToExact(BREATHING_UNIT, BREATHING_TARGET_MS);
-  appendBlock(steps, segments, 'Respiration', 'relaxation', breathFlat);
-  appendPause(steps, segments, ids.length + 1, 'Respiration', 'relaxation');
-  const finalFlat = buildLoopToExact(FINAL_UNIT, FINAL_TARGET_MS);
-  appendBlock(steps, segments, 'Relâchement final', 'relaxation', finalFlat);
+  appendCheckpoint(steps, segments, 1, 2, 'Contraction', 'Respiration');
+
+  // ---- Module 2 : Respiration ----
+  const breathId = weeklyBreathingId(weekIdx);
+  const breathDef = BREATHING_POOL[breathId];
+  const breathFlat = buildLoopToExact(breathDef.unit, BREATHING_TARGET_MS);
+  appendBlock(steps, segments, breathDef.name, 'breathing', breathFlat, 2);
+  appendPause(steps, segments, ids.length + 1, breathDef.name, 'breathing', 2);
+  appendCheckpoint(steps, segments, 2, 3, 'Respiration', "Contrôle de l'excitation");
+
+  // ---- Module 3 : Contrôle de l'excitation ----
+  const exIds = weeklyExcitationIds(weekIdx);
+  exIds.forEach((id, i) => {
+    const def = EXCITATION_POOL[id];
+    const unit = excitationUnitFor(id, weekIdx);
+    const flat = buildLoopToExact(unit, EXCITATION_SLOT_DURATIONS_MS[i]);
+    appendBlock(steps, segments, def.name, def.category, flat, 3);
+    if(i < exIds.length - 1) appendPause(steps, segments, ids.length + 1 + i + 1, def.name, def.category, 3);
+  });
 
   const totalBlocks = segments.filter(s => s.kind === 'block').length;
   return {
     id:'exercice-kegel', name:'Exercice de Kegel',
-    objective:`Semaine ${weekIdx+1} : ${ids.length} types de contraction, puis respiration et relâchement final.`,
-    steps, segments, totalBlocks, contractionBlockCount: ids.length, weekIdx
+    objective:`Semaine ${weekIdx+1} : ${ids.length} types de contraction, puis respiration (${breathDef.name}), puis contrôle de l'excitation (${exIds.length} exercices).`,
+    steps, segments, totalBlocks,
+    contractionBlockCount: ids.length,
+    breathingBlockCount: 1,
+    excitationBlockCount: exIds.length,
+    weekIdx
   };
 }
-// Nom de phase pour l'affichage : chaque bloc "sait" dans quelle grande phase il se trouve.
+// Nom de phase pour l'affichage : chaque bloc "sait" dans quelle grande phase il se
+// trouve. Le module Respiration occupe toujours EXACTEMENT un bloc, donc cette simple
+// comparaison reste valable même si le nombre de blocs du module 3 varie.
 function phaseNameForBlockId(blockId, contractionBlockCount){
   if(blockId < contractionBlockCount) return 'Contractions';
   if(blockId === contractionBlockCount) return 'Respiration';
-  return 'Relâchement final';
+  return "Contrôle de l'excitation";
 }
 function getTodayExercise(){ return buildFullExercise(programWeekIndex()); }
 
-const STEP_LABELS = {
-  CONTRACT:'Contraction', RELEASE:'Relâchement', REST:'Relâcher', HOLD:'Maintien',
-  PULSE:'Battements', RAMP_UP:'Montée en intensité', RAMP_DOWN:'Descente en intensité',
-  PAUSE:'Repos'
-};
-const STEP_COACH = {
+// Mini-exercice utilisé UNE fois, juste après le questionnaire, pour aider à
+// identifier physiquement le bon muscle (module 1) avant de démarrer le programme —
+// 3 contractions de 3s / relâchements de 3s, avec le même retour son+halo qu'une
+// vraie séance. Ne compte pas comme une séance du jour (pas d'appel à addSessionRecord).
+function buildCalibrationExercise(){
+  const steps = [], segments = [];
+  const unit = [{ action:'CONTRACT', durMs:3000, intensity:1 }, { action:'RELEASE', durMs:3000, intensity:1 }];
+  const flat = buildLoopToExact(unit, 18000);
+  appendBlock(steps, segments, 'Calibration', 'calibration', flat, 1);
+  return {
+    id:'calibration', name:'Contraction guidée',
+    objective:'Identifiez la bonne contraction avant de commencer votre programme.',
+    steps, segments, totalBlocks:1, contractionBlockCount:1, breathingBlockCount:0, excitationBlockCount:0
+  };
+}
+
+// Coaching adapté à chaque module : le vocabulaire d'une contraction Kegel
+// ("Contractez fort") n'a pas de sens pour une respiration ("Inspirez") ni pour un
+// exercice de contrôle ("Freinez, gardez la maîtrise") — même vocabulaire d'action
+// (CONTRACT/HOLD/RAMP_UP...), trois façons différentes de le dire au bon moment.
+const STEP_COACH_M1 = {
   CONTRACT:'Contractez', RELEASE:'Relâchez', REST:'Reposez-vous', HOLD:'Maintenez la contraction',
   PULSE:'Petites pulsations', RAMP_DOWN:'Relâchez progressivement', PAUSE:'Relâchez, respirez'
 };
+const STEP_COACH_M2 = {
+  REST:'Inspirez, laissez le ventre se gonfler', RAMP_UP:'Expirez, légère remontée',
+  HOLD:'Retenez doucement', RAMP_DOWN:'Expirez lentement', RELEASE:'Expirez lentement',
+  PAUSE:'Respirez librement'
+};
+const STEP_COACH_M3 = {
+  CONTRACT:'Contractez fort, freinez', RELEASE:'Relâchez complètement', REST:'Respirez, laissez retomber',
+  HOLD:'Maintenez la compression', PULSE:'Contractions rapides de contrôle',
+  RAMP_DOWN:'Redescente maîtrisée', PAUSE:'Respirez, relâchez'
+};
 function coachTextFor(step, t){
-  if(step.action === 'RAMP_UP') return (t != null && t < 0.5) ? 'Serrer légèrement' : 'Serrer fort';
-  return STEP_COACH[step.action] || '';
+  const m = step.moduleIdx;
+  if(step.action === 'RAMP_UP'){
+    if(m === 2) return STEP_COACH_M2.RAMP_UP;
+    if(m === 3) return (t != null && t < 0.5) ? 'Serrez, montez en puissance' : 'Serrez fort, gardez le contrôle';
+    return (t != null && t < 0.5) ? 'Serrer légèrement' : 'Serrer fort';
+  }
+  const table = m === 2 ? STEP_COACH_M2 : (m === 3 ? STEP_COACH_M3 : STEP_COACH_M1);
+  return table[step.action] || '';
 }
 
 const TOTAL_WEEKS = 20;
@@ -341,6 +487,12 @@ function computeScores(answers){
   });
   return scores;
 }
+
+// Étape obligatoire, une seule fois par compte, entre le questionnaire et le
+// tableau de bord : identifier le bon muscle (module 1) et comprendre les repères
+// des modules 2/3 avant de commencer le programme.
+function isCalibrationDone(){ return !!lsGet('calibrationDone', false); }
+function setCalibrationDone(){ lsSet('calibrationDone', true); }
 
 function finalizeQuestionnaire(answers){
   const scores = computeScores(answers);
@@ -404,6 +556,25 @@ function weekFullDaysCount(weekIdx){
   return n;
 }
 function weekCompletionRatio(weekIdx){ return weekFullDaysCount(weekIdx) / 7; }
+
+// Moyenne (0-4) des 3 qualités ressenties par module pour une séance donnée — sert de
+// résumé compact dans l'historique. Tolère l'ancien format ("quality" unique) pour
+// des séances enregistrées avant l'introduction des 3 modules.
+function avgModuleQuality(fb){
+  if(!fb) return 0;
+  const vals = [fb.qualityM1, fb.qualityM2, fb.qualityM3].filter(v => v != null);
+  if(vals.length === 0) return fb.quality != null ? fb.quality : 0;
+  return Math.round(vals.reduce((a,v) => a+v, 0) / vals.length);
+}
+// Moyenne (0-4) d'un module précis ('qualityM1'/'qualityM2'/'qualityM3') sur toutes
+// les séances complètes d'une semaine réelle donnée — base de la "corrélation
+// dynamique" demandée entre le programme et le progrès réellement constaté.
+// Renvoie null si aucune donnée cette semaine-là (semaine pas encore vécue).
+function weekModuleQualityAvg(weekIdx, key){
+  const sessions = weekSessions(weekIdx).filter(s => s.feedback && s.feedback[key] != null);
+  if(sessions.length === 0) return null;
+  return sessions.reduce((a,s) => a + s.feedback[key], 0) / sessions.length;
+}
 
 /* "Pas de rattrapage" : une séance non faite le jour même est définitivement perdue —
    il n'existe tout simplement aucun mécanisme pour enregistrer une séance à une date
@@ -510,7 +681,7 @@ function beep(freq, durationMs, volume){
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.type = 'sine';
-    osc.frequency.value = freq || 660;
+    osc.frequency.value = freq || 440;
     const now = ctx.currentTime;
     const vol = volume != null ? volume : 0.16;
     gain.gain.setValueAtTime(0, now);
@@ -529,21 +700,33 @@ function beep(freq, durationMs, volume){
    ni pendant le repos. Le halo, lui, disparaît au même instant (même signal = 0) mais
    via une transition CSS plus lente (~200ms) pour rester lisible à l'œil comme un
    glissement doux plutôt qu'un saut — seul le son coupe aussi vite (~18ms). */
-let toneOsc = null, toneGain = null;
-const TONE_FREQ_MIN = 380, TONE_FREQ_MAX = 880, TONE_VOL_MAX = 0.13;
+/* Plage de fréquences volontairement BASSE et resserrée (une octave, sol3~fa4) plutôt
+   qu'aiguë : l'oreille humaine est naturellement bien plus sensible/fatigable entre
+   2 et 5 kHz (voir les courbes isosoniques de Fletcher-Munson/ISO 226) — rester
+   nettement en-dessous, sur un registre grave-médium chaud, rend le son confortable
+   même pour une oreille sensible, sans perdre en clarté. Un filtre passe-bas doux
+   arrondit encore le timbre (limite les harmoniques aiguës), et le volume plafond
+   reste modéré (niveau conversationnel bas) — aucun risque auditif à l'usage prévu. */
+let toneOsc = null, toneGain = null, toneFilter = null;
+const TONE_FREQ_MIN = 190, TONE_FREQ_MAX = 360, TONE_VOL_MAX = 0.11;
 function ensureTone(){
   const ctx = ensureAudioCtx();
   if(!ctx) return null;
   if(!toneOsc){
     try{
       toneOsc = ctx.createOscillator();
+      toneFilter = ctx.createBiquadFilter();
       toneGain = ctx.createGain();
       toneOsc.type = 'sine';
+      toneFilter.type = 'lowpass';
+      toneFilter.frequency.value = 900;
+      toneFilter.Q.value = 0.3;
       toneGain.gain.value = 0;
-      toneOsc.connect(toneGain);
+      toneOsc.connect(toneFilter);
+      toneFilter.connect(toneGain);
       toneGain.connect(ctx.destination);
       toneOsc.start();
-    }catch(e){ toneOsc = null; toneGain = null; return null; }
+    }catch(e){ toneOsc = null; toneGain = null; toneFilter = null; return null; }
   }
   return { ctx, osc: toneOsc, gain: toneGain };
 }
@@ -597,11 +780,19 @@ function cue(kind, intensity){
       // Signal distinct au changement de type de contraction, à l'instant précis où
       // la contraction reprend (jamais pendant le repos lui-même).
       vibrate([90,50,90]);
-      [740,988].forEach((f,i) => setTimeout(() => beep(f,130,0.15), i*130));
+      // Carillon descendu d'une octave par rapport à l'ancienne version (740/988 Hz) :
+      // même effet "transition" agréable, mais dans un registre grave, confortable.
+      [370,494].forEach((f,i) => setTimeout(() => beep(f,130,0.14), i*130));
       break;
     case 'finish':
       vibrate([80,60,80]);
-      [880,988,1175].forEach((f,i) => setTimeout(() => beep(f,170,0.16), i*140));
+      [440,494,588].forEach((f,i) => setTimeout(() => beep(f,170,0.15), i*140));
+      break;
+    case 'checkpoint':
+      // Marque la fin d'un module entier (plus qu'un simple changement de type) :
+      // un repère haptique/sonore un peu plus marqué, dans le même registre grave.
+      vibrate([100,50,100,50,100]);
+      [330,415,494].forEach((f,i) => setTimeout(() => beep(f,180,0.15), i*150));
       break;
   }
 }
@@ -618,6 +809,28 @@ function cue(kind, intensity){
    visuel via une transition CSS sur .circle-halo (~200ms, un halo qui glisse en douceur
    de 0 à sa taille ou l'inverse, jamais un "coup" instantané). */
 function computeContractionLevel(step, t){
+  // Module 1 (Contraction/Kegel) : quel que soit le type choisi cette semaine-là, le
+  // haut (1) et le bas (0) doivent TOUJOURS être atteints — seule la VITESSE pour y
+  // arriver change (une contraction "immédiate" y monte en un éclair, une contraction
+  // "progressive" y monte au fur et à mesure, sur toute la durée du pas) : on ignore
+  // donc ici toute intensité/amplitude partielle définie dans le pool et on force la
+  // pleine échelle 0..1, en gardant intacte la COURBE (donc la vitesse ressentie).
+  if(step.moduleIdx === 1){
+    switch(step.action){
+      case 'CONTRACT': return t < 0.3 ? t/0.3 : 1; // montée rapide (~30% du pas) puis plein jusqu'au relâchement
+      case 'HOLD': return 1; // maintien = toujours au maximum
+      case 'PULSE': {
+        const cyc = 1 / Math.max(1, step.count || 4);
+        const local = (t % cyc) / cyc;
+        return local < 0.5 ? local*2 : (1-local)*2; // pleine amplitude à chaque battement
+      }
+      case 'RAMP_UP': return t; // 0 -> 1 sur toute la durée du pas : vitesse = durée du pas
+      case 'RAMP_DOWN': return 1 - t; // 1 -> 0 sur toute la durée du pas, contraction active en continu (ex. Wave)
+      default: return 0; // RELEASE, REST, PAUSE : ni son ni halo
+    }
+  }
+  // Modules 2/3 (respiration, contrôle de l'excitation) : intensité volontairement plus
+  // douce, définie pas à pas dans leur propre pool — pas de normalisation forcée ici.
   const inten = step.intensity != null ? step.intensity : 0.6;
   switch(step.action){
     case 'CONTRACT': { const ease = t < 0.3 ? t/0.3 : 1; return ease * inten; }
@@ -678,10 +891,24 @@ class SessionEngine{
     this.stopped = true;
     stopToneHard();
     if(this._raf) cancelAnimationFrame(this._raf);
+    this._checkpointFinish = null;
     if(this._pendingResolve){
       const r = this._pendingResolve;
       this._pendingResolve = null;
       r();
+    }
+  }
+  // Appelé par l'UI quand l'utilisateur choisit "Continuer" ou "Faire une pause" sur
+  // l'écran de transition entre modules — reprend la progression au pas suivant.
+  // pauseAfter=true ("Faire une pause") : le module suivant démarre puis se fige
+  // IMMÉDIATEMENT (temps figé dès le 1er pas), prêt à être repris via le bouton pause
+  // habituel — sans quoi la pause serait posée un cran trop tard (après reprise du fil).
+  continueFromCheckpoint(pauseAfter){
+    if(this._checkpointFinish){
+      if(pauseAfter) this._pauseOnNextStep = true;
+      const f = this._checkpointFinish;
+      this._checkpointFinish = null;
+      f();
     }
   }
 
@@ -694,6 +921,20 @@ class SessionEngine{
       if(this.handlers.onStepStart) this.handlers.onStepStart(step, this.stepIndex, this.flat);
       this._cueForStep(step);
       const finish = () => { this._pendingResolve = null; resolve(); };
+      if(step.action === 'CHECKPOINT'){
+        // Pas de minuteur : le moteur attend une décision explicite de l'utilisateur
+        // (continueFromCheckpoint()) avant de passer au module suivant.
+        this._checkpointFinish = finish;
+        if(this.handlers.onCheckpoint) this.handlers.onCheckpoint(step);
+        return;
+      }
+      if(this._pauseOnNextStep){
+        this._pauseOnNextStep = false;
+        this.paused = true;
+        this._pauseStartTs = performance.now();
+        if(this.handlers.onPause) this.handlers.onPause();
+      }
+      this._frame(step, 0, 0); // rendu immédiat du 1er pas, même si figé en pause juste au-dessus
       const tick = () => {
         if(this.stopped){ finish(); return; }
         if(this.paused){ this._raf = requestAnimationFrame(tick); return; }
@@ -856,8 +1097,15 @@ function render(){
   const loggedIn = isLoggedIn();
   const profile = getProfile();
 
+  const calibrationDone = isCalibrationDone();
+
   if(!loggedIn && !['welcome','login','signup'].includes(STATE.view)) STATE.view = 'welcome';
   if(loggedIn && !profile && !['questionnaire','results'].includes(STATE.view)) STATE.view = 'questionnaire';
+  // Étape obligatoire après le questionnaire, avant tout accès au tableau de bord :
+  // identification du muscle (module 1) + repères pour les modules 2 et 3. On ne
+  // redirige PAS depuis 'results' : l'écran de résultats doit s'afficher normalement,
+  // c'est son propre bouton "Continuer" qui envoie vers la calibration.
+  if(loggedIn && profile && !calibrationDone && !['calibration','results'].includes(STATE.view)) STATE.view = 'calibration';
   if(loggedIn && profile && ['welcome','login','signup'].includes(STATE.view)) STATE.view = 'dashboard';
 
   let html = '';
@@ -867,6 +1115,7 @@ function render(){
     case 'login': html = renderLogin(); break;
     case 'questionnaire': html = renderQuestionnaire(); break;
     case 'results': html = renderResults(); break;
+    case 'calibration': html = renderCalibration(); break;
     case 'dashboard': html = renderDashboard(); break;
     case 'programme': html = renderProgramme(); break;
     case 'progress': html = renderProgress(); break;
@@ -1002,10 +1251,41 @@ function renderResults(){
     <div class="card">
       <h2>Votre exercice</h2>
       <p style="font-size:13px;color:var(--text-soft);line-height:1.55;">
-        Un programme sur ${TOTAL_WEEKS} semaines vient d'être créé à partir de ces résultats. Chaque jour, deux séances identiques de l'Exercice de Kegel (contractions, respiration, relâchement final — environ ${estimateMinutes(ex)} minutes), espacées d'au moins 2h — sans exception, et sans rattrapage possible en cas de séance manquée. Les types de contraction tournent chaque semaine (2 retirés, 2 ajoutés) pour varier le travail, sans changer la durée.
+        Un programme sur ${TOTAL_WEEKS} semaines vient d'être créé à partir de ces résultats. Chaque jour, deux séances identiques de l'Exercice de Kegel — 3 modules (Contraction, Respiration, Contrôle de l'excitation), environ ${estimateMinutes(ex)} minutes — espacées d'au moins 2h, sans exception et sans rattrapage possible en cas de séance manquée. Les exercices tournent chaque semaine pour varier le travail, sans changer la durée totale.
       </p>
     </div>
-    <button class="btn btn-primary btn-block" id="goDashboardBtn" style="margin-top:14px;">Voir mon programme</button>
+    <button class="btn btn-primary btn-block" id="goDashboardBtn" style="margin-top:14px;">Continuer</button>
+  </div>`;
+}
+
+/* ---------- Calibration obligatoire (identification musculaire) ---------- */
+function renderCalibration(){
+  return `
+  <div class="wrap screen">
+    <div class="topbar" style="padding-left:0;padding-right:0;"><h1>Avant de commencer</h1></div>
+    <div class="card">
+      <h2>1. Identifiez le bon muscle (module Contraction)</h2>
+      <p style="font-size:13px;color:var(--text-soft);line-height:1.6;">
+        La façon la plus simple de le repérer : essayez de retenir un gaz, ou — une seule fois, pour sentir où ça se passe, sans en faire une habitude — d'arrêter le jet d'urine en cours de miction. Le bon muscle se contracte sans que vous serriez le ventre, les fesses ou les cuisses : si l'un de ces trois bouge, ce n'est pas le bon geste.
+      </p>
+      <p style="font-size:13px;color:var(--text-soft);line-height:1.6;margin-top:8px;">
+        Essayez maintenant une contraction guidée de 18 secondes (son + vibration, comme pendant une vraie séance) pour vous entraîner à isoler ce muscle avant de commencer le programme.
+      </p>
+      <button class="btn btn-primary btn-block" id="tryCalibrationBtn" style="margin-top:12px;">Essayer une contraction guidée</button>
+    </div>
+    <div class="card">
+      <h2>2. Le module Respiration</h2>
+      <p style="font-size:13px;color:var(--text-soft);line-height:1.6;">
+        Une main sur le ventre, une sur la poitrine : à l'inspiration, c'est le ventre qui doit bouger le plus (le plancher pelvien s'allonge et se détend) ; à l'expiration, le plancher pelvien remonte doucement. Aucun effort à fournir — juste suivre le rythme affiché.
+      </p>
+    </div>
+    <div class="card">
+      <h2>3. Le module Contrôle de l'excitation</h2>
+      <p style="font-size:13px;color:var(--text-soft);line-height:1.6;">
+        Il entraîne le geste musculaire (serrage ferme, tenue, rythme monter/stopper) utilisé par des techniques comportementales reconnues (stop-start, squeeze) — à réutiliser ensuite dans votre pratique réelle, seul ou en couple. C'est un entraînement informel, pas un dispositif médical.
+      </p>
+    </div>
+    <button class="btn btn-primary btn-block" id="calibrationDoneBtn" style="margin-top:14px;">C'est compris, commencer mon programme</button>
   </div>`;
 }
 
@@ -1128,7 +1408,7 @@ function renderProgramme(){
     <div class="card">
       <h2>Cette semaine — semaine ${wk+1}</h2>
       <p style="font-size:12.5px;color:var(--text-soft);line-height:1.6;margin-bottom:10px;">
-        Les types de contraction tournent chaque semaine (2 retirés, 2 ajoutés) pour varier le travail : voici les 6 de cette semaine, suivis de la respiration puis du relâchement final — ${estimateMinutes(ex)} min environ au total.
+        Les types de contraction tournent chaque semaine (2 retirés, 2 ajoutés) pour varier le travail : voici les 6 de cette semaine, suivis du module Respiration puis du module Contrôle de l'excitation (lui aussi renouvelé chaque semaine) — ${estimateMinutes(ex)} min environ au total.
       </p>
       <div class="week-types-list">
         ${weeklyIds.map((id,i) => `<div class="week-type-chip"><span class="n">${i+1}</span>${escapeHtml(CONTRACTION_POOL[id].name)}</div>`).join('')}
@@ -1137,7 +1417,7 @@ function renderProgramme(){
     <div class="card">
       <h2>Principe</h2>
       <p style="font-size:12.5px;color:var(--text-soft);line-height:1.6;">
-        Chaque jour, deux séances identiques (mêmes 6 durées de contraction, respiration, relâchement final), espacées d'au moins 2h. Une séance non faite dans la journée est définitivement manquée — pas de rattrapage — et une journée avec une seule séance ne compte pour rien dans votre assiduité : il faut les 2.
+        Chaque jour, deux séances identiques (mêmes 3 modules : Contraction, Respiration, Contrôle de l'excitation), espacées d'au moins 2h. Une séance non faite dans la journée est définitivement manquée — pas de rattrapage — et une journée avec une seule séance ne compte pour rien dans votre assiduité : il faut les 2.
       </p>
       <button class="btn btn-ghost btn-block" id="goDashFromProgBtn" style="margin-top:12px;">Voir l'exercice du jour</button>
     </div>
@@ -1149,11 +1429,30 @@ function renderProgress(){
   const sessions = getSessions().slice().reverse();
   const weeksBack = 8;
   const wk = programWeekIndex();
-  const counts = [];
-  for(let i=weeksBack-1;i>=0;i--){
-    counts.push(weekFullDaysCount(Math.max(0, wk-i)));
-  }
+  const weekIdxs = [];
+  for(let i=weeksBack-1;i>=0;i--) weekIdxs.push(Math.max(0, wk-i));
+  const counts = weekIdxs.map(w => weekFullDaysCount(w));
   const max = Math.max(1, 7, ...counts);
+
+  // Évolution par module : moyenne de qualité ressentie (0-4), semaine par semaine,
+  // calculée dynamiquement à partir des vraies séances enregistrées — pas de données
+  // fictives. Une semaine sans séance complète affiche une barre vide (pas de donnée).
+  const MODULES = [
+    { key:'qualityM1', label:'Contraction' },
+    { key:'qualityM2', label:'Respiration' },
+    { key:'qualityM3', label:"Contrôle de l'excitation" }
+  ];
+  const moduleCharts = MODULES.map(m => {
+    const vals = weekIdxs.map(w => weekModuleQualityAvg(w, m.key));
+    return `
+    <div class="module-trend">
+      <div class="module-trend-label">${escapeHtml(m.label)}</div>
+      <div class="chart chart-sm">
+        ${vals.map(v => `<div class="chart-bar"><div class="fill ${v==null?'empty':''}" style="height:${v==null?'4':Math.max(6,(v/4)*100)}%"></div></div>`).join('')}
+      </div>
+    </div>`;
+  }).join('');
+
   return `
   <div class="wrap screen">
     <div class="topbar" style="padding-left:0;padding-right:0;"><h1>Progrès</h1></div>
@@ -1166,13 +1465,18 @@ function renderProgress(){
       <div class="chart-labels">${counts.map((_,i)=> `<span>${i===counts.length-1?'auj.':'-'+(counts.length-1-i)}</span>`).join('')}</div>
     </div>
     <div class="card">
+      <h2>Évolution par module</h2>
+      <p style="font-size:11.5px;color:var(--text-soft);margin:-4px 0 10px;">Qualité ressentie que vous avez indiquée après chaque séance, semaine par semaine (8 dernières semaines).</p>
+      ${moduleCharts}
+    </div>
+    <div class="card">
       <h2>Historique des séances</h2>
       ${sessions.length===0 ? '<p class="empty-note">Aucune séance enregistrée pour l\'instant.</p>' : sessions.slice(0,60).map(s => `
         <div class="hist-item">
           <div class="hist-date">${formatDateShort(s.date)}</div>
           <div class="hist-info">
             <div class="name">${escapeHtml(s.exerciseName || 'Exercice de Kegel')}</div>
-            <div class="meta">${s.completed ? 'Terminée' : 'Interrompue'}${s.feedback ? ' · qualité ' + (s.feedback.quality+1) + '/5' : ''}</div>
+            <div class="meta">${s.completed ? 'Terminée' : 'Interrompue'}${s.feedback ? ' · qualité moyenne ' + (avgModuleQuality(s.feedback)+1) + '/5' : ''}</div>
           </div>
           ${s.feedback && s.feedback.pain>=2 ? '<span class="hist-flag" title="Douleur signalée">⚠️</span>' : ''}
         </div>`).join('')}
@@ -1337,7 +1641,14 @@ function wireView(){
   }
 
   if(STATE.view === 'results'){
-    document.getElementById('goDashboardBtn').addEventListener('click', () => navigate('dashboard'));
+    document.getElementById('goDashboardBtn').addEventListener('click', () => navigate('calibration'));
+  }
+
+  if(STATE.view === 'calibration'){
+    const tryBtn = document.getElementById('tryCalibrationBtn');
+    if(tryBtn) tryBtn.addEventListener('click', () => launchCalibrationSession());
+    const doneBtn = document.getElementById('calibrationDoneBtn');
+    if(doneBtn) doneBtn.addEventListener('click', () => { setCalibrationDone(); navigate('dashboard'); });
   }
 
   if(STATE.view === 'dashboard'){
@@ -1431,15 +1742,28 @@ document.addEventListener('visibilitychange', () => {
    MAXIMALE (à glow=1) est plafonnée à la fois par rapport au cercle et par rapport
    à la largeur d'écran, pour qu'il ne touche JAMAIS les bords, quel que soit le
    type de contraction ou la taille de l'appareil. */
-let haloGeom = { basePx: 70, maxPx: 190 };
+let haloGeom = { basePx: 80, maxPx: 190 };
 function measureHaloGeom(){
   const wrapEl = document.querySelector('.circle-wrap');
   if(!wrapEl) return;
   const wrapPx = wrapEl.getBoundingClientRect().width || 240;
-  const basePx = wrapPx * 0.46;
-  const capByViewport = window.innerWidth * 0.82;
-  const capByWrap = wrapPx * 1.7;
-  const maxPx = Math.max(basePx, Math.min(capByViewport, capByWrap));
+  // Le plus BAS que le halo puisse atteindre pendant une contraction active correspond
+  // exactement au contour blanc du cercle (.circle-ring, 52% du wrap) : jamais plus
+  // petit que ça tant qu'une contraction est en cours, jamais "invisible" sauf au vrai
+  // relâchement/repos (voir updateSessionFrame). Le plus HAUT reste plafonné à la fois
+  // par rapport au cercle, à la largeur d'écran, ET à l'espace vertical réellement
+  // disponible autour du cercle (pour ne jamais toucher ni les bords, ni l'étiquette
+  // "Type X/6 · ..." au-dessus, ni le bandeau du bas).
+  const basePx = wrapPx * 0.52;
+  const capByViewport = window.innerWidth * 0.86;
+  const capByWrap = wrapPx * 1.9;
+  let capByHeight = capByViewport;
+  const midEl = document.querySelector('.session-mid');
+  if(midEl){
+    const midH = midEl.getBoundingClientRect().height || capByViewport;
+    capByHeight = midH * 0.82;
+  }
+  const maxPx = Math.max(basePx, Math.min(capByViewport, capByWrap, capByHeight));
   haloGeom = { basePx, maxPx };
 }
 window.addEventListener('resize', () => { if(document.querySelector('.circle-wrap')) measureHaloGeom(); });
@@ -1464,7 +1788,36 @@ function launchSession(){
     onFrame: (info) => updateSessionFrame(info),
     onPause: () => setSessionButtonState(true),
     onResume: () => setSessionButtonState(false),
-    onComplete: (reason) => onSessionComplete(reason)
+    onComplete: (reason) => onSessionComplete(reason),
+    onCheckpoint: (step) => openCheckpointModal(step)
+  });
+  activeEngine = engine;
+  engine.start();
+}
+
+// Séance courte et non comptabilisée, réutilisant le même écran/moteur qu'une vraie
+// séance (mêmes retours son+halo) pour aider à identifier le bon muscle. Pas de
+// vérification de canStartSession() (n'entre pas dans le quota des 2 séances/jour),
+// pas de formulaire de ressenti à la fin, pas d'enregistrement dans l'historique.
+function launchCalibrationSession(){
+  ensureAudioCtx();
+  requestWakeLock();
+  const ex = buildCalibrationExercise();
+  activeExercise = ex;
+  renderSessionShell(ex);
+  const engine = new SessionEngine(ex, {
+    onStepStart: (step) => updateSessionPhase(step),
+    onFrame: (info) => updateSessionFrame(info),
+    onPause: () => setSessionButtonState(true),
+    onResume: () => setSessionButtonState(false),
+    onComplete: (reason) => {
+      releaseWakeLock();
+      document.getElementById('sessionRoot').innerHTML = '';
+      activeEngine = null;
+      if(reason === 'completed') cue('finish');
+      navigate('calibration');
+      toast(reason === 'completed' ? 'Essai terminé — vous pouvez recommencer ou continuer.' : 'Essai interrompu — vous pouvez recommencer.');
+    }
   });
   activeEngine = engine;
   engine.start();
@@ -1534,11 +1887,12 @@ function openHelpModal(){
       <div class="modal-card">
         <div class="modal-title">Comment lire l'écran de séance</div>
         <div class="modal-msg" style="text-align:left;">
-          <p style="margin:0 0 10px;"><strong>Halo rouge</strong> — rattaché au même signal que le son : il s'élargit en douceur (jamais d'un coup) au fur et à mesure qu'une contraction monte en intensité, puis se réduit en douceur jusqu'à disparaître complètement dès le relâchement — rien du tout au repos, même transparent.</p>
-          <p style="margin:0 0 10px;"><strong>Anneau et point</strong> — le point parcourt l'anneau pour montrer votre progression dans le type de contraction en cours.</p>
-          <p style="margin:0 0 10px;"><strong>Chiffre au centre</strong> — le temps restant, en secondes, pour le type de contraction en cours (jusqu'à 0, puis 9s de repos avant le type suivant).</p>
-          <p style="margin:0 0 10px;"><strong>Bandeau du bas</strong> — la séquence complète : à gauche ce qui est fini, au centre le type en cours, à droite ce qui arrive.</p>
-          <p style="margin:0;"><strong>Le son</strong> ne joue QUE pendant la contraction : sa hauteur suit l'intensité qui monte, reste stable pendant un maintien — puis coupe net dès le relâchement, silence total au repos. Vous pouvez faire toute la séance au son seul, l'écran ne se verrouille pas pendant ce temps.</p>
+          <p style="margin:0 0 10px;"><strong>3 modules</strong> — Contraction (Kegel), puis Respiration, puis Contrôle de l'excitation. Entre chaque module, on vous propose de continuer tout de suite ou de faire une pause avant d'attaquer le suivant.</p>
+          <p style="margin:0 0 10px;"><strong>Halo rouge</strong> — rattaché au même signal que le son. Dès qu'une contraction est en cours, il reste toujours visible, entre son plus petit (le contour blanc du cercle) et son plus grand (sans jamais toucher les bords de l'écran) — seule la vitesse pour passer de l'un à l'autre change selon l'exercice. Il disparaît complètement dès le relâchement — rien du tout au repos, même transparent.</p>
+          <p style="margin:0 0 10px;"><strong>Anneau et point</strong> — le point parcourt l'anneau pour montrer votre progression dans l'exercice en cours.</p>
+          <p style="margin:0 0 10px;"><strong>Chiffre au centre</strong> — le temps restant, en secondes, pour l'exercice en cours (jusqu'à 0, puis 9s de repos avant le suivant).</p>
+          <p style="margin:0 0 10px;"><strong>Bandeau du bas</strong> — la séquence complète : à gauche ce qui est fini, au centre l'exercice en cours, à droite ce qui arrive.</p>
+          <p style="margin:0;"><strong>Le son</strong>, volontairement grave et doux (confortable même pour une oreille sensible), ne joue QUE pendant une contraction : il monte avec l'intensité, reste stable pendant un maintien — puis coupe net dès le relâchement, silence total au repos. Vous pouvez faire toute la séance au son seul, l'écran ne se verrouille pas pendant ce temps.</p>
         </div>
         <div class="modal-actions"><button class="btn btn-primary btn-block" id="helpCloseBtn">Compris</button></div>
       </div>
@@ -1549,6 +1903,37 @@ function openHelpModal(){
   document.getElementById('helpCloseBtn').addEventListener('click', close);
 }
 
+// Transition entre deux modules ("Contraction -> Respiration", "Respiration ->
+// Contrôle de l'excitation") : on propose explicitement de continuer ou de faire
+// une pause avant d'attaquer le module suivant, plutôt que d'enchaîner tout seul.
+function openCheckpointModal(step){
+  cue('checkpoint');
+  const root = document.getElementById('modalRoot');
+  root.innerHTML = `
+    <div class="modal-overlay" id="checkpointOverlay">
+      <div class="modal-card">
+        <div class="modal-title">Module « ${escapeHtml(step.fromName)} » terminé ✅</div>
+        <div class="modal-msg" style="text-align:left;">
+          Prêt à enchaîner avec le module suivant : <strong>${escapeHtml(step.toName)}</strong> ?
+          Vous pouvez continuer tout de suite, ou faire une pause avant de reprendre — la séance vous attend, rien n'est perdu.
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-ghost" id="checkpointPauseBtn">Faire une pause</button>
+          <button class="btn btn-primary" id="checkpointContinueBtn">Continuer</button>
+        </div>
+      </div>
+    </div>`;
+  const close = () => { root.innerHTML = ''; };
+  document.getElementById('checkpointContinueBtn').addEventListener('click', () => {
+    close();
+    if(activeEngine) activeEngine.continueFromCheckpoint();
+  });
+  document.getElementById('checkpointPauseBtn').addEventListener('click', () => {
+    close();
+    if(activeEngine) activeEngine.continueFromCheckpoint(true); // avance puis se fige aussitôt sur le 1er pas
+  });
+}
+
 function setSessionButtonState(paused){
   const btn = document.getElementById('sessionPauseBtn');
   if(!btn) return;
@@ -1557,19 +1942,27 @@ function setSessionButtonState(paused){
 }
 
 function updateSessionPhase(step){
+  if(step.action === 'CHECKPOINT') return; // couvert par la modale de transition de module
   const tag = document.getElementById('sessionTypeTag');
   if(tag && activeExercise){
     const ccount = activeExercise.contractionBlockCount;
+    const ecount = activeExercise.excitationBlockCount || 1;
     if(step.action === 'PAUSE'){
       const nextPhase = phaseNameForBlockId(step.blockId + 1, ccount);
-      tag.textContent = nextPhase === 'Contractions'
-        ? `Repos · avant type ${step.blockPos + 1}/${ccount}`
-        : `Repos · avant : ${nextPhase}`;
+      if(nextPhase === 'Contractions') tag.textContent = `Repos · avant type ${step.blockPos + 1}/${ccount}`;
+      else if(nextPhase === 'Respiration') tag.textContent = `Repos · avant : Respiration`;
+      else {
+        const pos = (step.blockPos + 1) - ccount - 1;
+        tag.textContent = `Repos · avant contrôle ${pos}/${ecount}`;
+      }
     } else {
       const phase = phaseNameForBlockId(step.blockId, ccount);
-      tag.textContent = phase === 'Contractions'
-        ? `Type ${step.blockPos}/${ccount} · ${step.typeName || ''}`
-        : step.typeName || phase;
+      if(phase === 'Contractions') tag.textContent = `Type ${step.blockPos}/${ccount} · ${step.typeName || ''}`;
+      else if(phase === 'Respiration') tag.textContent = step.typeName || phase;
+      else {
+        const pos = step.blockPos - ccount - 1;
+        tag.textContent = `Contrôle ${pos}/${ecount} · ${step.typeName || ''}`;
+      }
     }
   }
   const strip = document.getElementById('sessionTypeStrip');
@@ -1601,17 +1994,26 @@ function updateSessionFrame(info){
   if(coachEl) coachEl.textContent = coachTextFor(step, t);
 
   if(haloEl){
-    // Taille en px calculée (pas un transform:scale) et plafonnée par measureHaloGeom()
-    // — garantit que le halo ne touche jamais les bords de l'écran, quel que soit le
-    // type de contraction. Échelle purement proportionnelle depuis 0 (aucun palier/
-    // offset artificiel) : à glow=0, largeur/hauteur/opacité valent exactement 0. La
-    // transition CSS sur .circle-halo (voir style.css) se charge de lisser le passage
-    // d'une valeur cible à l'autre en douceur — jamais un saut brutal ("pas un coup").
-    const g = Math.max(0, Math.min(1, glow || 0));
-    const px = haloGeom.maxPx * g;
-    haloEl.style.width = px + 'px';
-    haloEl.style.height = px + 'px';
-    haloEl.style.opacity = g.toFixed(2);
+    // Deux états bien distincts :
+    // - Une contraction est active (CONTRACT/HOLD/PULSE/RAMP_UP/RAMP_DOWN) : le halo est
+    //   TOUJOURS visible (opacité pleine), et sa TAILLE seule varie entre le plus bas —
+    //   le contour blanc du cercle (haloGeom.basePx) — et le plus haut — la limite sûre
+    //   par rapport à l'écran (haloGeom.maxPx). Peu importe le type de contraction, ces
+    //   deux bornes sont TOUJOURS atteintes ; seule la vitesse pour y arriver change
+    //   (voir computeContractionLevel). Aucun saut brutal : la transition CSS sur
+    //   .circle-halo lisse chaque changement de taille en douceur.
+    // - Aucune contraction (RELEASE/REST/PAUSE) : rien du tout, même transparent.
+    const activeContraction = step.action === 'CONTRACT' || step.action === 'HOLD' ||
+      step.action === 'PULSE' || step.action === 'RAMP_UP' || step.action === 'RAMP_DOWN';
+    if(!activeContraction){
+      haloEl.style.opacity = 0;
+    } else {
+      const g = Math.max(0, Math.min(1, glow || 0));
+      const px = haloGeom.basePx + (haloGeom.maxPx - haloGeom.basePx) * g;
+      haloEl.style.width = px + 'px';
+      haloEl.style.height = px + 'px';
+      haloEl.style.opacity = 1;
+    }
   }
   if(rotorEl && step.blockTotalMs){
     const elapsedInBlock = Math.max(0, step.blockTotalMs - remainingTypeMs);
@@ -1638,7 +2040,7 @@ function onSessionComplete(reason){
 
 /* ---------- Feedback post-séance — une seule fois, après l'exercice complet ---------- */
 function showFeedbackScreen(){
-  const fb = { difficulty:2, fatigue:2, quality:3, relaxation:3, pain:0 };
+  const fb = { difficulty:2, fatigue:2, qualityM1:3, qualityM2:3, qualityM3:3, relaxation:3, pain:0 };
   const root = document.getElementById('sessionRoot');
 
   function draw(){
@@ -1650,7 +2052,10 @@ function showFeedbackScreen(){
 
         ${fbScale('difficulty','Difficulté ressentie', ['Trop facile','Facile','Adaptée','Difficile','Trop difficile'], fb.difficulty)}
         ${fbScale('fatigue','Fatigue musculaire', ['Aucune','Légère','Modérée','Forte','Épuisante'], fb.fatigue)}
-        ${fbScale('quality',"Qualité d'exécution", ['Faible','Passable','Correcte','Bonne','Excellente'], fb.quality)}
+        <p class="lbl" style="margin:16px 0 2px;">Qualité ressentie, module par module</p>
+        ${fbScale('qualityM1','Contraction', ['Faible','Passable','Correcte','Bonne','Excellente'], fb.qualityM1)}
+        ${fbScale('qualityM2','Respiration', ['Faible','Passable','Correcte','Bonne','Excellente'], fb.qualityM2)}
+        ${fbScale('qualityM3',"Contrôle de l'excitation", ['Faible','Passable','Correcte','Bonne','Excellente'], fb.qualityM3)}
         ${fbScale('relaxation','Relâchement après l\'effort', ['Difficile','Partiel','Moyen','Bon','Complet'], fb.relaxation)}
         ${fbScale('pain','Douleur pendant la séance', ['Aucune','Légère','Modérée','Forte','Très forte'], fb.pain, true)}
 
@@ -1706,7 +2111,8 @@ function submitFeedback(fb){
     painStreak += 1;
   } else {
     painStreak = 0;
-    if(fb.difficulty <= 1 && fb.quality >= 3 && fb.fatigue <= 2) level = Math.min(4, level + 1);
+    // Le niveau global reste piloté par le module 1 (Contraction/Kegel), comme avant.
+    if(fb.difficulty <= 1 && fb.qualityM1 >= 3 && fb.fatigue <= 2) level = Math.min(4, level + 1);
   }
   setProgramLevel(level);
   lsSet('programPainStreak', painStreak);
