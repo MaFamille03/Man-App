@@ -40,7 +40,7 @@ h1,h2,h3,p{ margin:0; }
 ul{ margin:0; padding:0; list-style:none; }
 input,select,textarea{ font-family:inherit; }
 
-#app{ min-height:100vh; padding-bottom:calc(74px + var(--safe-bottom)); }
+#app{ min-height:100vh; min-height:100dvh; padding-bottom:calc(74px + var(--safe-bottom)); }
 
 /* ---------- Layout générique ----------
    padding-top tient compte de env(safe-area-inset-top) directement ici : c'est le
@@ -92,7 +92,7 @@ input,select,textarea{ font-family:inherit; }
 .btn-sm{ padding:9px 13px; font-size:12.5px; border-radius:10px; }
 
 /* ---------- Onboarding / Welcome / Connexion ---------- */
-.hero-screen{ min-height:100vh; display:flex; flex-direction:column; justify-content:center; padding:calc(32px + var(--safe-top)) 22px calc(32px + var(--safe-bottom)); text-align:center; }
+.hero-screen{ min-height:100vh; min-height:100dvh; display:flex; flex-direction:column; justify-content:center; padding:calc(32px + var(--safe-top)) 22px calc(32px + var(--safe-bottom)); text-align:center; }
 .hero-mark{
   width:76px; height:76px; margin:0 auto 18px; border-radius:22px;
   background:#000;
@@ -181,12 +181,14 @@ input,select,textarea{ font-family:inherit; }
 .day-pair{ display:flex; flex-direction:column; align-items:center; gap:6px; flex:1; }
 .day-pair .dow{ font-size:10px; font-weight:800; color:var(--text-faint); }
 .day-pair.today .dow{ color:var(--violet); }
+.day-pair.fully-missed .dow{ color:var(--danger); }
 .day-pair .dots{ display:flex; flex-direction:column; gap:3px; }
 .day-dot{ width:9px; height:9px; border-radius:50%; background:var(--border); }
 .day-dot.done{ background:var(--ok); }
 .day-dot.pending{ background:#fff; border:1.5px solid var(--violet); }
-.day-dot.missed{ background:rgba(229,72,77,.4); }
+.day-dot.missed{ background:var(--danger); } /* rouge net et sans ambiguïté : ce jour ne compte pas */
 .day-dot.future{ background:var(--border); opacity:.6; }
+.day-grid-note{ font-size:11px; color:var(--text-faint); line-height:1.5; margin-top:10px; }
 
 .mini-dims{ display:flex; flex-direction:column; gap:9px; }
 .mini-dim-row{ display:flex; align-items:center; gap:8px; }
@@ -195,12 +197,20 @@ input,select,textarea{ font-family:inherit; }
 .lvl-pip{ width:16px; height:7px; border-radius:4px; background:var(--border); }
 .lvl-pip.on{ background:var(--teal); }
 
-/* ---------- Bottom nav ---------- */
+/* ---------- Bottom nav ----------
+   position:fixed seul suffit en théorie, mais Safari iOS a un bug connu : quand la
+   barre d'adresse se rétracte/réapparaît (au fil du scroll, ou en changeant d'onglet
+   qui a moins de contenu), les éléments fixed peuvent visiblement "sauter" le temps
+   que la fenêtre visuelle se stabilise. translateZ(0)/will-change forcent cette barre
+   sur sa propre couche GPU (moins de tremblement) ; le repositionnement fin contre la
+   fenêtre visuelle réelle est fait en JS, voir pinBottomNav() dans app.js. */
 .bottom-nav{
   position:fixed; left:0; right:0; bottom:0; z-index:40;
   display:flex; background:#fff; border-top:1px solid var(--border);
   padding-bottom:var(--safe-bottom);
   box-shadow:0 -4px 18px rgba(20,10,50,.06);
+  transform:translateZ(0); -webkit-transform:translateZ(0);
+  will-change:transform; backface-visibility:hidden; -webkit-backface-visibility:hidden;
 }
 .nav-tab{
   flex:1; display:flex; flex-direction:column; align-items:center; gap:3px;
@@ -229,6 +239,16 @@ input,select,textarea{ font-family:inherit; }
   background:rgba(255,255,255,.72); border-radius:12px;
 }
 .unlocked-note{ font-size:12px; font-weight:700; color:var(--ok); margin-bottom:10px; }
+.week-legend{ font-size:11px; color:var(--text-faint); line-height:1.6; margin-top:12px; }
+.week-types-list{ display:flex; flex-direction:column; gap:7px; }
+.week-type-chip{
+  display:flex; align-items:center; gap:9px; padding:9px 11px; border-radius:10px;
+  background:var(--bg); border:1px solid var(--border); font-size:12.5px; font-weight:700; color:var(--text);
+}
+.week-type-chip .n{
+  flex:none; width:20px; height:20px; border-radius:50%; background:rgba(139,127,232,.14); color:var(--violet-dark);
+  display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:800;
+}
 
 /* ---------- Progrès / historique ---------- */
 .chart{ display:flex; align-items:flex-end; gap:6px; height:90px; margin-top:6px; }
@@ -275,20 +295,27 @@ input,select,textarea{ font-family:inherit; }
 
 .session-type-tag{ font-size:11.5px; font-weight:800; letter-spacing:.5px; text-transform:uppercase; color:rgba(255,255,255,.5); text-align:center; }
 
-/* Le cercle central reste modeste ; un large halo rouge (calque séparé, agrandi et
-   assombri via transform/opacity à chaque frame) s'élargit très visiblement autour
-   de lui pendant une contraction et revient à rien au relâchement — c'est LUI qui
-   doit se voir de loin, pas le petit cercle. Dégradé radial pensé pour aller du
-   rouge transparent près du centre vers un rouge net/pur en s'éloignant, comme une
-   onde qui part du cercle. Un anneau fin (avec un repère fixe en haut + un point
-   mobile) montre la progression dans le type de contraction en cours ; le chiffre
-   au centre est le temps restant (en secondes) pour ce type en cours, pas le
-   micro-pas — il décroît jusqu'à 0, puis vient le repos de 9s. */
-.circle-wrap{ width:min(80vw,320px); height:min(80vw,320px); position:relative; display:flex; align-items:center; justify-content:center; flex:none; }
+/* Le cercle central reste modeste ; un halo rouge (calque séparé, dimensionné en
+   pixels par JS à chaque frame — voir measureHaloGeom()/updateSessionFrame) apparaît
+   et s'élargit UNIQUEMENT pendant une contraction, revient à rien (opacité 0, pas
+   juste "discret") au relâchement complet et surtout pendant le repos. Sa taille
+   maximale est plafonnée en JS par rapport à l'écran : il ne touche jamais les
+   bords, quel que soit le type de contraction. Dégradé radial resserré : une petite
+   zone transparente près du centre, puis très vite une large bande de rouge net/pur
+   en s'éloignant (au lieu d'un centre transparent trop grand). Un anneau fin (avec
+   un repère fixe en haut + un point mobile) montre la progression dans le type de
+   contraction en cours ; le chiffre au centre est le temps restant (en secondes)
+   pour ce type en cours, pas le micro-pas — il décroît jusqu'à 0, puis repos 9s. */
+.circle-wrap{ width:min(66vw,260px); height:min(66vw,260px); position:relative; display:flex; align-items:center; justify-content:center; flex:none; }
 .circle-halo{
-  position:absolute; width:60%; height:60%; border-radius:50%;
-  background:radial-gradient(circle, rgba(221,31,47,0) 0%, rgba(221,31,47,0) 48%, rgba(221,31,47,.92) 80%, rgba(221,31,47,.08) 100%);
-  opacity:.1; transform:scale(1); pointer-events:none; will-change:opacity,transform;
+  position:absolute; left:50%; top:50%; width:0; height:0; border-radius:50%;
+  transform:translate(-50%,-50%);
+  background:radial-gradient(circle, rgba(221,31,47,0) 0%, rgba(221,31,47,0) 16%, rgba(221,31,47,.95) 50%, rgba(221,31,47,.95) 82%, rgba(221,31,47,.12) 100%);
+  opacity:0; pointer-events:none; will-change:width,height,opacity;
+  /* Lisse tout changement de valeur cible (largeur/hauteur/opacité) en un glissement
+     doux plutôt qu'un saut instantané : le halo doit toujours sembler partir de 0
+     jusqu'à sa taille (ou l'inverse), jamais apparaître/disparaître "d'un coup". */
+  transition:opacity .2s ease, width .2s ease, height .2s ease;
 }
 .circle-ring{
   position:absolute; width:46%; height:46%; border-radius:50%;
@@ -396,5 +423,5 @@ input,select,textarea{ font-family:inherit; }
 @media (max-width:380px){
   .wrap{ padding:calc(14px + var(--safe-top)) 13px 20px; }
   .today-card h3{ font-size:17px; }
-  .circle-wrap{ width:min(74vw,270px); height:min(74vw,270px); }
+  .circle-wrap{ width:min(62vw,230px); height:min(62vw,230px); }
 }

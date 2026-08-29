@@ -129,125 +129,176 @@ const QUESTIONNAIRE = [
   { id:'a3', dim:'arousalControl', text:"Dans un moment de forte intensité physique ou émotionnelle, je garde une sensation de contrôle sur mon plancher pelvien plutôt que de le sentir m'échapper." }
 ];
 
-/* ============ 4. L'EXERCICE DE KEGEL — protocole unique, quotidien, x2/jour ============
+/* ============ 4. L'EXERCICE DE KEGEL — 3 phases, quotidien, x2/jour, roulement hebdo ============
    Moteur piloté par données. Types d'étape reconnus :
      CONTRACT / RELEASE / REST / HOLD / PULSE / RAMP_UP / RAMP_DOWN / LOOP / PAUSE
-   Structure exacte demandée : 5 types de contraction UNIQUES (le premier, "Trembling
-   2", revient une seconde fois en position 5/6), séparés par des pauses de 9s
-   ("Repos" — les relâchements À L'INTÉRIEUR d'un type s'appellent "Relâcher"). Le
-   nom de chaque type est conservé tel quel (non traduit). L'ancien type "Démarrage"
-   a été retiré (n'est plus nécessaire). Durée totale : 392s ≈ 6 min 32.
-     1. Trembling 2        45s  — contraction/relâchement de 1s en alternance
-     2. Front Clamp        60s  — contraction légère → forte (2s) puis relâchement (0.5s)
-     3. Short Holding 2     65s — serrer et tenir 6s puis relâcher 6s, en boucle
-     4. Starter             69s — 0.5s contract / 0.5s relâcher / 4s contract / 0.5s relâcher
-     5. Trembling 2 (bis)   45s — identique au type 1
-     6. Steady trembling    63s — contraction 4s / relâcher 2s, en boucle
-   Chaque durée ci-dessous a été construite pour tomber EXACTEMENT sur le total en
-   secondes fourni (ex. Trembling 2 : 22×[1000+1000] + 1000 = 45000ms). */
+   Structure d'une séance : Phase 1 « Contractions » (6 types, tirés d'une réserve de
+   10 et qui tournent chaque semaine — 2 retirés / 2 ajoutés — voir plus bas), puis
+   Phase 2 « Respiration », puis Phase 3 « Relâchement final ». Des pauses de 9s
+   ("Repos") séparent chaque bloc ; les relâchements À L'INTÉRIEUR d'un bloc
+   s'appellent "Relâcher". Les 6 durées des blocs de contraction restent FIXES d'une
+   semaine à l'autre (45/60/65/69/45/63 s, 347s au total) : seul le TYPE de
+   contraction affecté à chaque durée change, donc le temps d'exercice ne bouge pas. */
 const PAUSE_BETWEEN_TYPES_MS = 9000;
 
-function loopSteps(times, steps){
-  const out = [];
-  for(let i=0;i<times;i++) out.push(...steps);
-  return out;
+// Construit une boucle de `unit` (motif de base, en durées nominales "durMs") pour
+// atteindre EXACTEMENT targetMs, avec une répétition partielle finale si besoin —
+// c'est ce qui garantissait déjà les totaux exacts (45s, 60s, ...) au tour précédent,
+// généralisé ici pour n'importe quel motif et n'importe quelle cible.
+function buildLoopToExact(unit, targetMs){
+  const mk = (u, dur) => {
+    const s = { action:u.action, duration:dur };
+    if(u.intensity != null) s.intensity = u.intensity;
+    if(u.from != null) s.from = u.from;
+    if(u.to != null) s.to = u.to;
+    if(u.count != null) s.count = u.count;
+    return s;
+  };
+  const unitMs = unit.reduce((a,s) => a + s.durMs, 0);
+  const loops = Math.max(0, Math.floor(targetMs / unitMs));
+  let remaining = targetMs - loops * unitMs;
+  const steps = [];
+  for(let i=0;i<loops;i++) unit.forEach(u => steps.push(mk(u, u.durMs)));
+  for(let i=0;i<unit.length && remaining > 0;i++){
+    const take = Math.min(unit[i].durMs, remaining);
+    if(take > 0) steps.push(mk(unit[i], take));
+    remaining -= take;
+  }
+  return steps;
 }
 
-const CONTRACTION_DEFINITIONS = {
-  'trembling-2': {
-    id:'trembling-2', name:'Trembling 2', category:'endurance',
-    steps:[
-      ...loopSteps(22, [
-        { action:'CONTRACT', duration:1000, intensity:0.55 },
-        { action:'RELEASE', duration:1000 }
-      ]),
-      { action:'CONTRACT', duration:1000, intensity:0.55 }
-    ] // 22*(1000+1000) + 1000 = 45000ms
-  },
-  'front-clamp': {
-    id:'front-clamp', name:'Front Clamp', category:'control',
-    steps: loopSteps(24, [
-      { action:'RAMP_UP', duration:2000, from:0.3, to:1 },
-      { action:'RELEASE', duration:500 }
-    ]) // 24*(2000+500) = 60000ms
-  },
-  'short-holding-2': {
-    id:'short-holding-2', name:'Short Holding 2', category:'endurance',
-    steps:[
-      ...loopSteps(5, [
-        { action:'HOLD', duration:6000, intensity:0.85 },
-        { action:'RELEASE', duration:6000 }
-      ]),
-      { action:'HOLD', duration:5000, intensity:0.85 }
-    ] // 5*(6000+6000) + 5000 = 65000ms
-  },
-  'starter': {
-    id:'starter', name:'Starter', category:'control',
-    steps:[
-      ...loopSteps(12, [
-        { action:'CONTRACT', duration:500, intensity:0.5 },
-        { action:'RELEASE', duration:500 },
-        { action:'CONTRACT', duration:4000, intensity:0.9 },
-        { action:'RELEASE', duration:500 }
-      ]),
-      { action:'CONTRACT', duration:500, intensity:0.5 },
-      { action:'RELEASE', duration:500 },
-      { action:'CONTRACT', duration:2000, intensity:0.9 }
-    ] // 12*(500+500+4000+500) + (500+500+2000) = 66000 + 3000 = 69000ms
-  },
-  'steady-trembling': {
-    id:'steady-trembling', name:'Steady trembling', category:'endurance',
-    steps:[
-      ...loopSteps(10, [
-        { action:'CONTRACT', duration:4000, intensity:0.7 },
-        { action:'RELEASE', duration:2000 }
-      ]),
-      { action:'CONTRACT', duration:3000, intensity:0.7 }
-    ] // 10*(4000+2000) + 3000 = 63000ms
-  }
+/* Réserve de types de contraction (les 5 fournis + 5 nouveaux construits sur le même
+   principe : alternance rapide/lente, montée par paliers, maintien long, oscillation
+   continue, salves — les grands classiques de la rééducation périnéale de type
+   Kegel). Les noms des 5 premiers sont conservés tels quels (non traduits). */
+const CONTRACTION_POOL = {
+  'trembling-2': { name:'Trembling 2', category:'endurance', unit:[
+    { action:'CONTRACT', durMs:1000, intensity:0.55 }, { action:'RELEASE', durMs:1000, intensity:0.55 }
+  ]},
+  'front-clamp': { name:'Front Clamp', category:'control', unit:[
+    { action:'RAMP_UP', durMs:2000, from:0.3, to:1 }, { action:'RELEASE', durMs:500, intensity:1 }
+  ]},
+  'short-holding-2': { name:'Short Holding 2', category:'endurance', unit:[
+    { action:'HOLD', durMs:6000, intensity:0.85 }, { action:'RELEASE', durMs:6000, intensity:0.85 }
+  ]},
+  'starter': { name:'Starter', category:'control', unit:[
+    { action:'CONTRACT', durMs:500, intensity:0.5 }, { action:'RELEASE', durMs:500, intensity:0.5 },
+    { action:'CONTRACT', durMs:4000, intensity:0.9 }, { action:'RELEASE', durMs:500, intensity:0.9 }
+  ]},
+  'steady-trembling': { name:'Steady trembling', category:'endurance', unit:[
+    { action:'CONTRACT', durMs:4000, intensity:0.7 }, { action:'RELEASE', durMs:2000, intensity:0.7 }
+  ]},
+  'elevator': { name:'Elevator', category:'control', unit:[
+    { action:'RAMP_UP', durMs:700, from:0, to:0.35 }, { action:'HOLD', durMs:600, intensity:0.35 },
+    { action:'RAMP_UP', durMs:700, from:0.35, to:0.7 }, { action:'HOLD', durMs:600, intensity:0.7 },
+    { action:'RAMP_UP', durMs:700, from:0.7, to:1 }, { action:'HOLD', durMs:1000, intensity:1 },
+    { action:'RELEASE', durMs:1700, intensity:1 }
+  ]}, // contraction "par étages", façon ascenseur, avant un relâchement complet
+  'quick-flicks': { name:'Quick Flicks', category:'control', unit:[
+    { action:'CONTRACT', durMs:300, intensity:0.8 }, { action:'RELEASE', durMs:300, intensity:0.8 }
+  ]}, // contractions très brèves et rapides (fibres à contraction rapide)
+  'long-hold': { name:'Long Hold', category:'endurance', unit:[
+    { action:'RAMP_UP', durMs:1500, from:0, to:1 }, { action:'HOLD', durMs:8000, intensity:1 }, { action:'RELEASE', durMs:3000, intensity:1 }
+  ]}, // un maintien long et soutenu, proche de la composante "Endurance" du PERFECT scheme
+  'wave': { name:'Wave', category:'relaxation', unit:[
+    { action:'RAMP_UP', durMs:2500, from:0.15, to:0.75 }, { action:'RAMP_DOWN', durMs:2500, from:0.75, to:0.15 }
+  ]}, // oscillation continue, sans à-coup, pour travailler le contrôle en douceur
+  'pulse-burst': { name:'Pulse Burst', category:'endurance', unit:[
+    { action:'PULSE', durMs:2000, count:6, intensity:0.75 }, { action:'RELEASE', durMs:1500, intensity:0.75 }
+  ]}
 };
+const CONTRACTION_POOL_ORDER = ['trembling-2','front-clamp','short-holding-2','starter','steady-trembling','elevator','quick-flicks','long-hold','wave','pulse-burst'];
+const SLOT_DURATIONS_MS = [45000, 60000, 65000, 69000, 45000, 63000]; // fixes, 347000ms au total, chaque semaine
 
-// L'ordre exact demandé, avec "Trembling 2" répété en position 5.
-const EXERCISE_SEQUENCE = ['trembling-2', 'front-clamp', 'short-holding-2', 'starter', 'trembling-2', 'steady-trembling'];
+/* Roulement hebdomadaire : la toute première semaine reprend exactement la séquence
+   fournie (avec Trembling 2 en double). À partir de la semaine 2, on fait glisser une
+   fenêtre de 6 types sur la réserve de 10 (circulaire), décalée de 2 chaque semaine :
+   ça retire mécaniquement les 2 types les plus anciens et en ajoute 2 nouveaux, tout
+   en gardant les 6 mêmes durées ci-dessus (donc le temps total ne change jamais). */
+function weeklyContractionIds(weekIdx){
+  if(weekIdx <= 0) return ['trembling-2','front-clamp','short-holding-2','starter','trembling-2','steady-trembling'];
+  const n = CONTRACTION_POOL_ORDER.length;
+  const offset = (2 * weekIdx) % n;
+  const ids = [];
+  for(let i=0;i<6;i++) ids.push(CONTRACTION_POOL_ORDER[(offset + i) % n]);
+  return ids;
+}
 
-function buildDailyExercise(){
-  const steps = [];
-  const segments = [];
-  EXERCISE_SEQUENCE.forEach((defId, i) => {
-    const def = CONTRACTION_DEFINITIONS[defId];
-    const flat = flattenSteps(def.steps);
-    const blockTotalMs = flat.reduce((a,s) => a + s.duration, 0);
-    const segIndex = segments.length;
-    segments.push({ kind:'block', name: def.name });
-    let cursor = blockTotalMs;
-    flat.forEach((s, si) => {
-      const remainingInBlockAtStepStart = cursor;
-      cursor -= s.duration;
-      steps.push(Object.assign({}, s, {
-        blockId: i, blockPos: i + 1,
-        typeName: def.name, typeCategory: def.category,
-        blockTotalMs, remainingInBlockAtStepStart,
-        segIndex, blockStart: si === 0
-      }));
-    });
-    if(i < EXERCISE_SEQUENCE.length - 1){
-      const pauseSegIndex = segments.length;
-      segments.push({ kind:'pause', name:'Repos' });
-      steps.push({
-        action:'PAUSE', duration: PAUSE_BETWEEN_TYPES_MS,
-        blockId:i, blockPos:i + 1, typeName: def.name, typeCategory: def.category,
-        blockTotalMs: PAUSE_BETWEEN_TYPES_MS, remainingInBlockAtStepStart: PAUSE_BETWEEN_TYPES_MS,
-        segIndex: pauseSegIndex, blockStart:false
-      });
-    }
+// Phase 2 — Respiration : 4 cycles fixes de 14s (inspiration/engagement doux 4s,
+// maintien léger 2s, expiration/relâchement 6s, repos 2s sans son ni halo).
+const BREATHING_UNIT = [
+  { action:'RAMP_UP', durMs:4000, from:0, to:0.4 },
+  { action:'HOLD', durMs:2000, intensity:0.4 },
+  { action:'RAMP_DOWN', durMs:6000, from:0.4, to:0 },
+  { action:'REST', durMs:2000 }
+];
+const BREATHING_TARGET_MS = 56000;
+
+// Phase 3 — Relâchement final : 2 cycles fixes de 15s, lents et doux, pour terminer
+// la séance sur un relâchement complet plutôt que sur un effort.
+const FINAL_UNIT = [
+  { action:'RAMP_UP', durMs:3000, from:0, to:0.5 },
+  { action:'HOLD', durMs:3000, intensity:0.5 },
+  { action:'RELEASE', durMs:6000, intensity:0.5 },
+  { action:'REST', durMs:3000 }
+];
+const FINAL_TARGET_MS = 30000;
+
+function appendBlock(steps, segments, name, category, flatSteps){
+  const blockTotalMs = flatSteps.reduce((a,s) => a + s.duration, 0);
+  const blockId = segments.filter(s => s.kind === 'block').length;
+  const segIndex = segments.length;
+  segments.push({ kind:'block', name });
+  let cursor = blockTotalMs;
+  flatSteps.forEach((s, si) => {
+    const remainingInBlockAtStepStart = cursor;
+    cursor -= s.duration;
+    steps.push(Object.assign({}, s, {
+      blockId, blockPos: blockId + 1, typeName: name, typeCategory: category,
+      blockTotalMs, remainingInBlockAtStepStart, segIndex, blockStart: si === 0
+    }));
   });
+}
+function appendPause(steps, segments, blockPos, typeName, typeCategory){
+  const segIndex = segments.length;
+  segments.push({ kind:'pause', name:'Repos' });
+  steps.push({
+    action:'PAUSE', duration: PAUSE_BETWEEN_TYPES_MS,
+    blockId: blockPos - 1, blockPos, typeName, typeCategory,
+    blockTotalMs: PAUSE_BETWEEN_TYPES_MS, remainingInBlockAtStepStart: PAUSE_BETWEEN_TYPES_MS,
+    segIndex, blockStart:false
+  });
+}
+
+function buildFullExercise(weekIdx){
+  const steps = [], segments = [];
+  const ids = weeklyContractionIds(weekIdx);
+  ids.forEach((id, i) => {
+    const def = CONTRACTION_POOL[id];
+    const flat = buildLoopToExact(def.unit, SLOT_DURATIONS_MS[i]);
+    appendBlock(steps, segments, def.name, def.category, flat);
+    appendPause(steps, segments, i + 1, def.name, def.category);
+  });
+  const breathFlat = buildLoopToExact(BREATHING_UNIT, BREATHING_TARGET_MS);
+  appendBlock(steps, segments, 'Respiration', 'relaxation', breathFlat);
+  appendPause(steps, segments, ids.length + 1, 'Respiration', 'relaxation');
+  const finalFlat = buildLoopToExact(FINAL_UNIT, FINAL_TARGET_MS);
+  appendBlock(steps, segments, 'Relâchement final', 'relaxation', finalFlat);
+
+  const totalBlocks = segments.filter(s => s.kind === 'block').length;
   return {
     id:'exercice-kegel', name:'Exercice de Kegel',
-    objective:"5 types de contraction (Trembling 2 répété), séparés par des pauses de 9 secondes.",
-    steps, segments
+    objective:`Semaine ${weekIdx+1} : ${ids.length} types de contraction, puis respiration et relâchement final.`,
+    steps, segments, totalBlocks, contractionBlockCount: ids.length, weekIdx
   };
 }
-const KEGEL_EXERCISE = buildDailyExercise();
+// Nom de phase pour l'affichage : chaque bloc "sait" dans quelle grande phase il se trouve.
+function phaseNameForBlockId(blockId, contractionBlockCount){
+  if(blockId < contractionBlockCount) return 'Contractions';
+  if(blockId === contractionBlockCount) return 'Respiration';
+  return 'Relâchement final';
+}
+function getTodayExercise(){ return buildFullExercise(programWeekIndex()); }
 
 const STEP_LABELS = {
   CONTRACT:'Contraction', RELEASE:'Relâchement', REST:'Relâcher', HOLD:'Maintien',
@@ -309,21 +360,50 @@ function sessionsOnDay(ts){
 }
 function todaySessionsCount(){ return sessionsOnDay(Date.now()).length; }
 
+/* Toute la logique de semaine/jour ci-dessous s'appuie sur de VRAIES dates
+   calendaires (lundi → dimanche), jamais sur un décalage "jour N depuis le
+   début du programme" : une séance faite un samedi doit être comptée un
+   samedi, pas glisser vers un autre jour selon le jour où le programme a
+   démarré. Une journée ne "compte" dans les statistiques QUE si les deux
+   séances obligatoires (espacées de 2h) ont bien été faites ce jour-là :
+   une seule séance ce jour-là ne compte pour rien (pas de crédit partiel). */
+function mondayOf(ts){
+  const d = new Date(startOfDay(ts));
+  const dow = d.getDay(); // 0=dimanche .. 6=samedi
+  const diffToMonday = dow === 0 ? 6 : dow - 1;
+  d.setDate(d.getDate() - diffToMonday);
+  return d.getTime();
+}
+function isDayComplete(ts){ return sessionsOnDay(ts).length >= DAILY_REQUIRED; }
+
 function programDayIndex(){
   const start = lsGet('programStart', Date.now());
-  return Math.max(0, Math.floor((Date.now() - start) / 86400000));
+  return Math.max(0, Math.floor((startOfDay(Date.now()) - startOfDay(start)) / 86400000));
 }
-function programWeekIndex(){ return Math.min(TOTAL_WEEKS - 1, Math.floor(programDayIndex() / 7)); }
-
-function weekSessions(weekIdx){
+// Semaine réelle (lundi-dimanche) écoulée depuis la semaine calendaire de démarrage.
+function programWeekIndex(){
   const start = lsGet('programStart', Date.now());
-  const from = start + weekIdx * 7 * 86400000;
-  const to = from + 7 * 86400000;
+  const idx = Math.floor((mondayOf(Date.now()) - mondayOf(start)) / (7 * 86400000));
+  return Math.max(0, Math.min(TOTAL_WEEKS - 1, idx));
+}
+// Bornes réelles (lundi 00:00 → dimanche 24:00) de la semaine de programme `weekIdx`.
+function weekBounds(weekIdx){
+  const start = lsGet('programStart', Date.now());
+  const from = mondayOf(start) + weekIdx * 7 * 86400000;
+  return { from, to: from + 7 * 86400000 };
+}
+function weekSessions(weekIdx){
+  const { from, to } = weekBounds(weekIdx);
   return getSessions().filter(s => s.completed && s.date >= from && s.date < to);
 }
-function weekCompletionRatio(weekIdx){
-  return weekSessions(weekIdx).length / (7 * DAILY_REQUIRED);
+// Nombre de jours PLEINEMENT complétés (2/2, espacés de 2h) dans cette semaine réelle.
+function weekFullDaysCount(weekIdx){
+  const { from } = weekBounds(weekIdx);
+  let n = 0;
+  for(let i=0;i<7;i++) if(isDayComplete(from + i*86400000)) n++;
+  return n;
 }
+function weekCompletionRatio(weekIdx){ return weekFullDaysCount(weekIdx) / 7; }
 
 /* "Pas de rattrapage" : une séance non faite le jour même est définitivement perdue —
    il n'existe tout simplement aucun mécanisme pour enregistrer une séance à une date
@@ -336,11 +416,16 @@ function canStartSession(){
   return { ok:true };
 }
 
+// Assiduité "tout ou rien" : seuls les jours PLEINEMENT complétés (2 séances, 2h
+// d'écart) comptent — un jour avec une seule séance ne rapporte rien, exactement
+// comme demandé ("si je ne fais pas deux séances par jour... ça ne compte pas").
 function adherencePct(){
-  const dayIdx = programDayIndex();
-  const plannedSoFar = Math.max(1, (dayIdx + 1) * DAILY_REQUIRED);
-  const completed = getSessions().filter(s => s.completed).length;
-  return Math.max(0, Math.min(100, Math.round((completed / plannedSoFar) * 100)));
+  const startDay = startOfDay(lsGet('programStart', Date.now()));
+  const todayDay = startOfDay(Date.now());
+  const elapsedDays = Math.max(1, Math.round((todayDay - startDay) / 86400000) + 1);
+  let fullDays = 0;
+  for(let i=0;i<elapsedDays;i++) if(isDayComplete(startDay + i*86400000)) fullDays++;
+  return Math.max(0, Math.min(100, Math.round((fullDays / elapsedDays) * 100)));
 }
 
 function currentStreak(){
@@ -356,20 +441,29 @@ function currentStreak(){
   return streak;
 }
 
+// La semaine affichée sur le tableau de bord est la VRAIE semaine calendaire en
+// cours (lundi → dimanche), pas un décalage relatif au jour de démarrage du
+// programme — sinon une séance faite un vrai samedi peut se retrouver affichée
+// sous l'étiquette "lundi". dateNum/dow viennent directement de la vraie date.
 function currentWeekDayStatuses(){
-  const wk = programWeekIndex();
-  const start = lsGet('programStart', Date.now());
-  const weekStart = start + wk * 7 * 86400000;
+  const weekStart = mondayOf(Date.now());
   const todayStart = startOfDay(Date.now());
+  const programStartDay = startOfDay(lsGet('programStart', Date.now()));
   const days = [];
   for(let i=0;i<7;i++){
     const dayTs = weekStart + i * 86400000;
     const dStart = startOfDay(dayTs);
+    // Un jour avant le vrai début du programme n'est ni "à venir" ni "manqué" — le
+    // programme n'existait pas encore ce jour-là, donc pas de rouge injustifié.
+    const isBeforeStart = dStart < programStartDay;
+    const isPast = dStart < todayStart && !isBeforeStart;
     days.push({
       dayTs, dateNum: new Date(dayTs).getDate(),
-      count: dStart > todayStart ? 0 : sessionsOnDay(dayTs).length,
+      count: (dStart > todayStart || isBeforeStart) ? 0 : sessionsOnDay(dayTs).length,
       isFuture: dStart > todayStart,
-      isToday: dStart === todayStart
+      isToday: dStart === todayStart,
+      isPast, isBeforeStart,
+      isFullyMissed: isPast && sessionsOnDay(dayTs).length < DAILY_REQUIRED
     });
   }
   return days;
@@ -396,7 +490,7 @@ function vibrate(ms){
 
 /* Retour sonore (Web Audio API) : navigator.vibrate() n'est PAS supporté par Safari
    iOS (aucune implémentation de la Vibration API dans WebKit, y compris en PWA
-   installée) — les bips synthétisés ici sont donc le retour sensoriel fiable sur
+   installée) — le son synthétisé ici est donc le retour sensoriel fiable sur
    iPhone, en plus des vibrations qui fonctionnent sur Android. */
 let audioCtx = null;
 function ensureAudioCtx(){
@@ -407,7 +501,7 @@ function ensureAudioCtx(){
   return audioCtx;
 }
 function soundEnabled(){ return lsGet('soundOn', true); }
-function setSoundEnabled(v){ lsSet('soundOn', !!v); }
+function setSoundEnabled(v){ lsSet('soundOn', !!v); if(!v) silenceTone(); }
 function beep(freq, durationMs, volume){
   if(!soundEnabled()) return;
   const ctx = ensureAudioCtx();
@@ -427,18 +521,81 @@ function beep(freq, durationMs, volume){
     osc.stop(now + durationMs/1000 + 0.02);
   }catch(e){}
 }
+
+/* Son continu piloté par l'intensité de la contraction (computeContractionLevel,
+   voir plus bas — le MÊME signal unique qui pilote aussi le halo visuel) : la hauteur
+   ET le volume montent pendant la contraction, restent stables pendant un maintien —
+   et coupent NET dès que le relâchement commence : aucun bip pendant le relâchement,
+   ni pendant le repos. Le halo, lui, disparaît au même instant (même signal = 0) mais
+   via une transition CSS plus lente (~200ms) pour rester lisible à l'œil comme un
+   glissement doux plutôt qu'un saut — seul le son coupe aussi vite (~18ms). */
+let toneOsc = null, toneGain = null;
+const TONE_FREQ_MIN = 380, TONE_FREQ_MAX = 880, TONE_VOL_MAX = 0.13;
+function ensureTone(){
+  const ctx = ensureAudioCtx();
+  if(!ctx) return null;
+  if(!toneOsc){
+    try{
+      toneOsc = ctx.createOscillator();
+      toneGain = ctx.createGain();
+      toneOsc.type = 'sine';
+      toneGain.gain.value = 0;
+      toneOsc.connect(toneGain);
+      toneGain.connect(ctx.destination);
+      toneOsc.start();
+    }catch(e){ toneOsc = null; toneGain = null; return null; }
+  }
+  return { ctx, osc: toneOsc, gain: toneGain };
+}
+function setToneLevel(glow){
+  const g = Math.max(0, Math.min(1, glow || 0));
+  if(!soundEnabled() || g <= 0.001){ silenceTone(); return; }
+  const t = ensureTone();
+  if(!t) return;
+  const freq = TONE_FREQ_MIN + (TONE_FREQ_MAX - TONE_FREQ_MIN) * g;
+  const vol = TONE_VOL_MAX * (0.3 + 0.7 * g);
+  const now = t.ctx.currentTime;
+  try{
+    t.osc.frequency.cancelScheduledValues(now);
+    t.osc.frequency.setValueAtTime(t.osc.frequency.value, now);
+    t.osc.frequency.linearRampToValueAtTime(freq, now + 0.04);
+    t.gain.gain.cancelScheduledValues(now);
+    t.gain.gain.setValueAtTime(t.gain.gain.value, now);
+    t.gain.gain.linearRampToValueAtTime(vol, now + 0.04);
+  }catch(e){}
+}
+// Coupure NETTE (pas un fondu type "descend pendant le relâchement") : dès que
+// computeContractionLevel repasse à 0 (RELEASE/REST/PAUSE), le gain rejoint 0 en
+// ~18ms — juste assez pour éviter un "clic" audio, largement sous le seuil de
+// perception d'un son qui "traîne". Aucun bip pendant le relâchement ou le repos.
+function silenceTone(){
+  if(toneGain){
+    try{
+      const ctx = toneGain.context, now = ctx.currentTime;
+      toneGain.gain.cancelScheduledValues(now);
+      toneGain.gain.setValueAtTime(toneGain.gain.value, now);
+      toneGain.gain.linearRampToValueAtTime(0, now + 0.018);
+    }catch(e){}
+  }
+}
+function stopToneHard(){
+  silenceTone();
+  if(toneOsc){
+    const osc = toneOsc, gain = toneGain;
+    toneOsc = null; toneGain = null;
+    setTimeout(() => { try{ osc.stop(); osc.disconnect(); gain.disconnect(); }catch(e){} }, 40);
+  }
+}
+
 function cue(kind, intensity){
   const inten = intensity != null ? intensity : 0.6;
   switch(kind){
-    case 'contract': vibrate(Math.round(140*inten)+40); beep(880, 110, 0.15); break;
-    case 'rampup': vibrate(30); beep(760, 90, 0.11); break;
-    case 'release': beep(500, 140, 0.09); break;
-    case 'pause': beep(380, 220, 0.13); break;
-    case 'pulse-tick': vibrate(Math.round(60*inten)+30); beep(700, 55, 0.09); break;
-    case 'hold-tick': vibrate(22); beep(620, 45, 0.06); break;
+    case 'contract': vibrate(Math.round(140*inten)+40); break;
+    case 'rampup': vibrate(30); break;
+    case 'pause': vibrate(18); break; // repère haptique discret uniquement : aucun son pendant le repos
     case 'type-transition':
-      // Signal distinct au changement de type de contraction (différent du "pause"
-      // qui marque l'entrée en repos) : repère fiable sans regarder l'écran.
+      // Signal distinct au changement de type de contraction, à l'instant précis où
+      // la contraction reprend (jamais pendant le repos lui-même).
       vibrate([90,50,90]);
       [740,988].forEach((f,i) => setTimeout(() => beep(f,130,0.15), i*130));
       break;
@@ -449,13 +606,21 @@ function cue(kind, intensity){
   }
 }
 
-/* Renvoie l'intensité de teinte rouge (0..1) à appliquer sur la bordure du cercle. */
-function computeGlow(step, t){
+/* Intensité UNIQUE (0..1) de la contraction en cours — pilote À LA FOIS le son (hauteur
+   du bip) ET le halo visuel : les deux sont rattachés au même signal, comme demandé.
+   Non nul uniquement pendant une contraction réelle qui progresse (CONTRACT, RAMP_UP,
+   HOLD, PULSE, RAMP_DOWN — ce dernier reste une contraction active en cours d'évolution,
+   ex. le type "Wave" qui oscille sans interruption nette). Zéro strict pendant
+   RELEASE/REST/PAUSE : ni bip, ni halo, même transparent, pendant le relâchement ou le
+   repos — le SAUT entre "0" et "valeur cible" au changement de pas est ensuite lissé
+   séparément : côté son via la rampe de setToneLevel()/silenceTone() (très rapide,
+   ~18-40ms, car une traînée sonore même brève s'entend comme "encore du bip"), côté
+   visuel via une transition CSS sur .circle-halo (~200ms, un halo qui glisse en douceur
+   de 0 à sa taille ou l'inverse, jamais un "coup" instantané). */
+function computeContractionLevel(step, t){
   const inten = step.intensity != null ? step.intensity : 0.6;
   switch(step.action){
-    case 'REST': case 'PAUSE': return 0.03;
     case 'CONTRACT': { const ease = t < 0.3 ? t/0.3 : 1; return ease * inten; }
-    case 'RELEASE': return Math.max(0, (1-t)) * 0.6;
     case 'HOLD': return inten;
     case 'PULSE': {
       const cyc = 1 / Math.max(1, step.count || 4);
@@ -465,7 +630,7 @@ function computeGlow(step, t){
     }
     case 'RAMP_UP': { const from = step.from!=null?step.from:0, to = step.to!=null?step.to:1; return from+(to-from)*t; }
     case 'RAMP_DOWN': { const from = step.from!=null?step.from:1, to = step.to!=null?step.to:0; return from+(to-from)*t; }
-    default: return 0.03;
+    default: return 0; // RELEASE, REST, PAUSE : ni son ni halo
   }
 }
 
@@ -500,6 +665,7 @@ class SessionEngine{
     if(this.paused || this.stopped) return;
     this.paused = true;
     this._pauseStartTs = performance.now();
+    silenceTone();
     if(this.handlers.onPause) this.handlers.onPause();
   }
   resume(){
@@ -510,6 +676,7 @@ class SessionEngine{
   }
   stop(){
     this.stopped = true;
+    stopToneHard();
     if(this._raf) cancelAnimationFrame(this._raf);
     if(this._pendingResolve){
       const r = this._pendingResolve;
@@ -542,22 +709,8 @@ class SessionEngine{
   }
 
   _frame(step, t, elapsedInStep){
-    const glow = computeGlow(step, t);
-    if(step.action === 'PULSE'){
-      const cyc = step.duration / Math.max(1, step.count || 4);
-      const tickIdx = Math.floor(elapsedInStep / cyc);
-      if(tickIdx !== this._lastTick && (elapsedInStep % cyc) < cyc*0.5){
-        this._lastTick = tickIdx;
-        cue('pulse-tick', step.intensity);
-      }
-    } else if(step.action === 'HOLD' && step.duration >= 2500){
-      const period = 1500;
-      const tickIdx = Math.floor(elapsedInStep / period);
-      if(tickIdx > 0 && tickIdx !== this._lastTick && (elapsedInStep % period) < 40){
-        this._lastTick = tickIdx;
-        cue('hold-tick');
-      }
-    }
+    const glow = computeContractionLevel(step, t); // signal unique : pilote à la fois le son et le halo
+    setToneLevel(glow); // le son ne joue QUE pendant la contraction, coupe net au relâchement
     const elapsedTotal = this._elapsedTotalMs(elapsedInStep);
     if(this.handlers.onFrame){
       this.handlers.onFrame({
@@ -580,11 +733,11 @@ class SessionEngine{
     if(step.blockStart) cue('type-transition'); // nouveau type de contraction : repère distinct
     if(step.action === 'CONTRACT') cue('contract', step.intensity);
     else if(step.action === 'RAMP_UP') cue('rampup', step.to);
-    else if(step.action === 'RELEASE') cue('release');
-    else if(step.action === 'PAUSE') cue('pause');
+    else if(step.action === 'PAUSE') cue('pause'); // vibration seule : aucun son pendant le repos
   }
 
   _done(reason){
+    stopToneHard();
     if(this.handlers.onComplete) this.handlers.onComplete(reason, this.totalDuration);
   }
 }
@@ -677,6 +830,27 @@ const STATE = {
 
 function navigate(view){ STATE.view = view; render(); window.scrollTo(0,0); }
 
+/* Repositionne la barre de navigation du bas contre la vraie fenêtre VISIBLE
+   (visualViewport), pas contre la fenêtre de mise en page — c'est ce qui évite
+   qu'elle "saute" sur Safari iOS quand la barre d'adresse se rétracte ou
+   réapparaît en changeant d'écran (Accueil/Programme/Progrès/Réglages n'ont pas
+   tous la même hauteur de contenu, donc pas toujours le même état de la barre
+   d'adresse). translateZ(0) est conservé dans la même transform pour garder la
+   barre sur sa propre couche GPU (moins de tremblement pendant le scroll). */
+function pinBottomNav(){
+  const nav = document.querySelector('.bottom-nav');
+  if(!nav) return;
+  if(!window.visualViewport){ nav.style.transform = 'translateZ(0)'; return; }
+  const vv = window.visualViewport;
+  const gap = window.innerHeight - (vv.height + vv.offsetTop);
+  nav.style.transform = gap > 0.5 ? `translateZ(0) translateY(-${gap}px)` : 'translateZ(0)';
+}
+if(window.visualViewport){
+  window.visualViewport.addEventListener('resize', pinBottomNav);
+  window.visualViewport.addEventListener('scroll', pinBottomNav);
+}
+window.addEventListener('resize', pinBottomNav);
+
 function render(){
   const app = document.getElementById('app');
   const loggedIn = isLoggedIn();
@@ -702,6 +876,7 @@ function render(){
   const showNav = ['dashboard','programme','progress','settings'].includes(STATE.view);
   app.innerHTML = html + (showNav ? renderBottomNav() : '');
   wireView();
+  if(showNav) pinBottomNav();
 }
 
 function renderBottomNav(){
@@ -816,6 +991,7 @@ function renderQuestionnaire(){
 /* ---------- Résultats du profil ---------- */
 function renderResults(){
   const profile = getProfile();
+  const ex = getTodayExercise();
   return `
   <div class="wrap screen">
     <div class="topbar" style="padding-left:0;padding-right:0;"><h1>Votre profil</h1></div>
@@ -826,7 +1002,7 @@ function renderResults(){
     <div class="card">
       <h2>Votre exercice</h2>
       <p style="font-size:13px;color:var(--text-soft);line-height:1.55;">
-        Un programme sur ${TOTAL_WEEKS} semaines vient d'être créé à partir de ces résultats. Chaque jour, deux séances identiques de l'Exercice de Kegel (6 types de contraction, environ ${estimateMinutes(KEGEL_EXERCISE)} minutes), espacées d'au moins 2h — sans exception, et sans rattrapage possible en cas de séance manquée.
+        Un programme sur ${TOTAL_WEEKS} semaines vient d'être créé à partir de ces résultats. Chaque jour, deux séances identiques de l'Exercice de Kegel (contractions, respiration, relâchement final — environ ${estimateMinutes(ex)} minutes), espacées d'au moins 2h — sans exception, et sans rattrapage possible en cas de séance manquée. Les types de contraction tournent chaque semaine (2 retirés, 2 ajoutés) pour varier le travail, sans changer la durée.
       </p>
     </div>
     <button class="btn btn-primary btn-block" id="goDashboardBtn" style="margin-top:14px;">Voir mon programme</button>
@@ -844,12 +1020,13 @@ function renderDashboard(){
   const painStreak = lsGet('programPainStreak', 0);
   const days = currentWeekDayStatuses();
   const dow = ['L','M','M','J','V','S','D'];
+  const ex = getTodayExercise();
 
   let todayCardBody;
   if(todayCount >= DAILY_REQUIRED){
     todayCardBody = `<div class="done-note">Les deux séances d'aujourd'hui sont terminées ✅ Revenez demain — il n'y a pas de séance supplémentaire ni de rattrapage.</div>`;
   } else {
-    todayCardBody = `<p>${escapeHtml(KEGEL_EXERCISE.objective)} · ${estimateMinutes(KEGEL_EXERCISE)} min environ</p>` + (
+    todayCardBody = `<p>${escapeHtml(ex.objective)} · ${estimateMinutes(ex)} min environ</p>` + (
       cd.ok
         ? `<button class="btn" id="startTodayBtn">Commencer la séance ${todayCount+1}/${DAILY_REQUIRED}</button>`
         : `<div class="cooldown-note">Prochaine séance dans ${Math.ceil(cd.remainingMs/60000)} min (pause de 2h obligatoire entre les deux séances).</div>`
@@ -890,13 +1067,14 @@ function renderDashboard(){
       <h2>Cette semaine</h2>
       <div class="day-pair-grid">
         ${days.map((d,i) => `
-          <div class="day-pair ${d.isToday?'today':''}">
+          <div class="day-pair ${d.isToday?'today':''} ${d.isFullyMissed?'fully-missed':''}">
             <div class="dow">${dow[i]}</div>
             <div class="dots">
-              ${[0,1].map(slot => `<div class="day-dot ${slot<d.count?'done':(d.isFuture?'future':(d.isToday?'pending':'missed'))}"></div>`).join('')}
+              ${[0,1].map(slot => `<div class="day-dot ${slot<d.count?'done':((d.isFuture||d.isBeforeStart)?'future':(d.isToday?'pending':'missed'))}"></div>`).join('')}
             </div>
           </div>`).join('')}
       </div>
+      <p class="day-grid-note">Une journée ne compte dans votre assiduité que si les 2 séances (espacées de 2h) sont faites — sinon elle reste en rouge, définitivement.</p>
     </div>
 
     <div class="card">
@@ -911,18 +1089,21 @@ function renderProgramme(){
   const wk = programWeekIndex();
   const todayCount = todaySessionsCount();
   const unlocked = todayCount >= DAILY_REQUIRED;
+  const ex = getTodayExercise();
+  const weeklyIds = weeklyContractionIds(wk);
 
   let weekGridHtml = '<div class="week-grid">';
   for(let w=0; w<TOTAL_WEEKS; w++){
-    const isCurrent = w === programWeekIndex();
-    const isPast = w < programWeekIndex();
+    const isCurrent = w === wk;
+    const isPast = w < wk;
     let cls = '';
     if(isCurrent) cls = 'current';
     else if(isPast){
       const ratio = weekCompletionRatio(w);
       cls = ratio >= 1 ? 'full' : (ratio > 0 ? 'partial' : '');
     }
-    weekGridHtml += `<div class="week-cell ${cls}">${w+1}</div>`;
+    const fullDays = isPast || isCurrent ? weekFullDaysCount(w) : null;
+    weekGridHtml += `<div class="week-cell ${cls}" title="${fullDays!=null?fullDays+'/7 jours complets':'À venir'}">${w+1}</div>`;
   }
   weekGridHtml += '</div>';
 
@@ -934,7 +1115,7 @@ function renderProgramme(){
     <div class="card">
       <h2>Vue d'ensemble (${TOTAL_WEEKS} semaines)</h2>
       ${unlocked ? `
-        <p class="unlocked-note">Déverrouillé pour aujourd'hui ✅</p>
+        <p class="unlocked-note">Déverrouillé pour aujourd'hui ✅ · ${weekFullDaysCount(wk)}/7 jours complets cette semaine</p>
         ${weekGridHtml}
       ` : `
         <div class="programme-lock-wrap">
@@ -942,11 +1123,21 @@ function renderProgramme(){
           <div class="lock-banner">🔒 Validez vos ${DAILY_REQUIRED} séances du jour pour déverrouiller le programme complet (${todayCount}/${DAILY_REQUIRED} aujourd'hui)</div>
         </div>
       `}
+      <p class="week-legend">🟩 semaine à 7/7 jours complets · 🟨 semaine partiellement complétée · ⬜ semaine sans aucun jour complet</p>
+    </div>
+    <div class="card">
+      <h2>Cette semaine — semaine ${wk+1}</h2>
+      <p style="font-size:12.5px;color:var(--text-soft);line-height:1.6;margin-bottom:10px;">
+        Les types de contraction tournent chaque semaine (2 retirés, 2 ajoutés) pour varier le travail : voici les 6 de cette semaine, suivis de la respiration puis du relâchement final — ${estimateMinutes(ex)} min environ au total.
+      </p>
+      <div class="week-types-list">
+        ${weeklyIds.map((id,i) => `<div class="week-type-chip"><span class="n">${i+1}</span>${escapeHtml(CONTRACTION_POOL[id].name)}</div>`).join('')}
+      </div>
     </div>
     <div class="card">
       <h2>Principe</h2>
       <p style="font-size:12.5px;color:var(--text-soft);line-height:1.6;">
-        Chaque jour, deux séances identiques de l'Exercice de Kegel (6 types de contraction, environ ${estimateMinutes(KEGEL_EXERCISE)} minutes), espacées d'au moins 2h. Une séance non faite dans la journée est définitivement manquée : il n'y a pas de rattrapage.
+        Chaque jour, deux séances identiques (mêmes 6 durées de contraction, respiration, relâchement final), espacées d'au moins 2h. Une séance non faite dans la journée est définitivement manquée — pas de rattrapage — et une journée avec une seule séance ne compte pour rien dans votre assiduité : il faut les 2.
       </p>
       <button class="btn btn-ghost btn-block" id="goDashFromProgBtn" style="margin-top:12px;">Voir l'exercice du jour</button>
     </div>
@@ -957,16 +1148,18 @@ function renderProgramme(){
 function renderProgress(){
   const sessions = getSessions().slice().reverse();
   const weeksBack = 8;
+  const wk = programWeekIndex();
   const counts = [];
   for(let i=weeksBack-1;i>=0;i--){
-    counts.push(weekSessions(Math.max(0, programWeekIndex()-i)).length);
+    counts.push(weekFullDaysCount(Math.max(0, wk-i)));
   }
-  const max = Math.max(1, DAILY_REQUIRED*7, ...counts);
+  const max = Math.max(1, 7, ...counts);
   return `
   <div class="wrap screen">
     <div class="topbar" style="padding-left:0;padding-right:0;"><h1>Progrès</h1></div>
     <div class="card">
-      <h2>Séances complétées / semaine (sur ${DAILY_REQUIRED*7})</h2>
+      <h2>Jours complets / semaine (sur 7)</h2>
+      <p style="font-size:11.5px;color:var(--text-soft);margin:-4px 0 10px;">Un jour ne compte que si les 2 séances du jour (espacées de 2h) ont été faites — reflète vos vraies dates, pas de rattrapage.</p>
       <div class="chart">
         ${counts.map(c => `<div class="chart-bar"><div class="fill" style="height:${Math.max(4,(c/max)*100)}%"></div></div>`).join('')}
       </div>
@@ -1019,12 +1212,62 @@ function renderSettings(){
       </div>
     </div>
     <div class="card">
+      <h2>Sauvegarde</h2>
+      <div class="settings-row">
+        <div><div class="lbl">Exporter mes données</div><div class="desc">Tout est stocké uniquement sur cet appareil, sans serveur : téléchargez une copie (compte, profil, historique) pour ne rien perdre en changeant de téléphone ou de navigateur.</div></div>
+        <button class="btn btn-ghost btn-sm" id="exportDataBtn">Exporter</button>
+      </div>
+      <div class="settings-row">
+        <div><div class="lbl">Importer une sauvegarde</div><div class="desc">Restaure un fichier exporté depuis Kegel Control. Remplace les données actuelles de cet appareil.</div></div>
+        <button class="btn btn-ghost btn-sm" id="importDataBtn">Importer</button>
+        <input type="file" id="importDataInput" accept="application/json" style="display:none;">
+      </div>
+    </div>
+    <div class="card">
       <h2>À propos</h2>
       <p class="disclaimer">
         Kegel Control est un prototype d'entraînement du plancher pelvien fonctionnant entièrement sur cet appareil, sans serveur. Il propose un accompagnement progressif mais ne constitue pas un avis médical. En cas de douleur, d'incontinence sévère, de descente d'organe ou de doute, consultez un professionnel de santé (sage-femme, kinésithérapeute spécialisé en rééducation périnéale, médecin) avant de poursuivre.
       </p>
     </div>
   </div>`;
+}
+
+/* ---------- Export / import (sauvegarde locale, puisqu'il n'y a pas de serveur) ---------- */
+function exportData(){
+  const data = {};
+  Object.keys(localStorage).filter(k => k.startsWith(LS_PREFIX)).forEach(k => { data[k.slice(LS_PREFIX.length)] = JSON.parse(localStorage.getItem(k)); });
+  const blob = new Blob([JSON.stringify({ app:'kegel-control', exportedAt:Date.now(), data }, null, 2)], { type:'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `kegel-control-sauvegarde-${formatDateShort(Date.now()).replace(/\s/g,'-')}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  toast('Sauvegarde téléchargée ✅');
+}
+function importDataFromFile(file){
+  const reader = new FileReader();
+  reader.onload = () => {
+    try{
+      const parsed = JSON.parse(reader.result);
+      const data = parsed && parsed.data ? parsed.data : parsed;
+      if(!data || typeof data !== 'object') throw new Error('format invalide');
+      openConfirmModal({
+        title: 'Importer cette sauvegarde ?',
+        message: "Cela remplace les données actuelles de cet appareil (compte, profil, historique) par celles du fichier.",
+        confirmLabel: 'Importer',
+        danger: true,
+        onConfirm: () => {
+          lsRemoveAll();
+          Object.keys(data).forEach(k => lsSet(k, data[k]));
+          toast('Sauvegarde importée ✅');
+          STATE.view = isLoggedIn() ? (getProfile() ? 'dashboard' : 'questionnaire') : 'welcome';
+          render();
+        }
+      });
+    }catch(e){ toast("Fichier de sauvegarde illisible."); }
+  };
+  reader.readAsText(file);
 }
 
 /* ============ 9. ÉVÉNEMENTS DE VUE ============ */
@@ -1148,11 +1391,61 @@ function wireView(){
         onConfirm: () => { lsRemoveAll(); toast('Compte supprimé'); navigate('welcome'); }
       });
     });
+
+    document.getElementById('exportDataBtn').addEventListener('click', exportData);
+    const importInput = document.getElementById('importDataInput');
+    document.getElementById('importDataBtn').addEventListener('click', () => importInput.click());
+    importInput.addEventListener('change', () => {
+      if(importInput.files && importInput.files[0]) importDataFromFile(importInput.files[0]);
+      importInput.value = '';
+    });
   }
 }
 
 /* ============ 10. ÉCRAN DE SÉANCE GUIDÉE ============ */
+/* ---------- Écran allumé pendant la séance (Screen Wake Lock API) ----------
+   Demandé explicitement : l'utilisateur pilote la séance au son seul, sans toucher
+   au téléphone — l'écran ne doit donc jamais se verrouiller pendant ce temps.
+   Supporté par Safari iOS 16.4+ (y compris en PWA installée) et par Chrome/Android ;
+   sans échec bruyant sur les navigateurs qui ne le supportent pas. Le verrou est
+   automatiquement relâché par le navigateur si l'onglet passe en arrière-plan : on
+   le redemande alors dès que l'app redevient visible, tant qu'une séance tourne. */
+let wakeLock = null;
+async function requestWakeLock(){
+  try{
+    if('wakeLock' in navigator){
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    }
+  }catch(e){ wakeLock = null; }
+}
+async function releaseWakeLock(){
+  try{ if(wakeLock) await wakeLock.release(); }catch(e){}
+  wakeLock = null;
+}
+document.addEventListener('visibilitychange', () => {
+  if(document.visibilityState === 'visible' && activeEngine && !activeEngine.stopped) requestWakeLock();
+});
+
+/* Géométrie du halo rouge, mesurée sur le cercle réellement affiché : la taille
+   MAXIMALE (à glow=1) est plafonnée à la fois par rapport au cercle et par rapport
+   à la largeur d'écran, pour qu'il ne touche JAMAIS les bords, quel que soit le
+   type de contraction ou la taille de l'appareil. */
+let haloGeom = { basePx: 70, maxPx: 190 };
+function measureHaloGeom(){
+  const wrapEl = document.querySelector('.circle-wrap');
+  if(!wrapEl) return;
+  const wrapPx = wrapEl.getBoundingClientRect().width || 240;
+  const basePx = wrapPx * 0.46;
+  const capByViewport = window.innerWidth * 0.82;
+  const capByWrap = wrapPx * 1.7;
+  const maxPx = Math.max(basePx, Math.min(capByViewport, capByWrap));
+  haloGeom = { basePx, maxPx };
+}
+window.addEventListener('resize', () => { if(document.querySelector('.circle-wrap')) measureHaloGeom(); });
+
 let activeEngine = null;
+let activeExercise = null;
 
 function launchSession(){
   const cd = canStartSession();
@@ -1162,8 +1455,11 @@ function launchSession(){
     return;
   }
   ensureAudioCtx(); // créé/débloqué ici, sur un vrai geste utilisateur (requis par iOS Safari)
-  renderSessionShell(KEGEL_EXERCISE);
-  const engine = new SessionEngine(KEGEL_EXERCISE, {
+  requestWakeLock(); // même geste utilisateur : l'écran ne se verrouille plus pendant la séance
+  const ex = getTodayExercise();
+  activeExercise = ex;
+  renderSessionShell(ex);
+  const engine = new SessionEngine(ex, {
     onStepStart: (step) => updateSessionPhase(step),
     onFrame: (info) => updateSessionFrame(info),
     onPause: () => setSessionButtonState(true),
@@ -1228,6 +1524,7 @@ function renderSessionShell(ex){
     if(activeEngine.paused) activeEngine.resume(); else activeEngine.pause();
   });
   document.getElementById('sessionHelpBtn').addEventListener('click', openHelpModal);
+  measureHaloGeom();
 }
 
 function openHelpModal(){
@@ -1237,11 +1534,11 @@ function openHelpModal(){
       <div class="modal-card">
         <div class="modal-title">Comment lire l'écran de séance</div>
         <div class="modal-msg" style="text-align:left;">
-          <p style="margin:0 0 10px;"><strong>Halo rouge</strong> — s'élargit pendant une contraction et revient à rien au relâchement : plus il est large, plus la contraction en cours est intense.</p>
+          <p style="margin:0 0 10px;"><strong>Halo rouge</strong> — rattaché au même signal que le son : il s'élargit en douceur (jamais d'un coup) au fur et à mesure qu'une contraction monte en intensité, puis se réduit en douceur jusqu'à disparaître complètement dès le relâchement — rien du tout au repos, même transparent.</p>
           <p style="margin:0 0 10px;"><strong>Anneau et point</strong> — le point parcourt l'anneau pour montrer votre progression dans le type de contraction en cours.</p>
           <p style="margin:0 0 10px;"><strong>Chiffre au centre</strong> — le temps restant, en secondes, pour le type de contraction en cours (jusqu'à 0, puis 9s de repos avant le type suivant).</p>
           <p style="margin:0 0 10px;"><strong>Bandeau du bas</strong> — la séquence complète : à gauche ce qui est fini, au centre le type en cours, à droite ce qui arrive.</p>
-          <p style="margin:0;">Un bip et une vibration marquent chaque contraction, chaque relâchement et chaque changement de type, pour suivre la séance sans regarder l'écran.</p>
+          <p style="margin:0;"><strong>Le son</strong> ne joue QUE pendant la contraction : sa hauteur suit l'intensité qui monte, reste stable pendant un maintien — puis coupe net dès le relâchement, silence total au repos. Vous pouvez faire toute la séance au son seul, l'écran ne se verrouille pas pendant ce temps.</p>
         </div>
         <div class="modal-actions"><button class="btn btn-primary btn-block" id="helpCloseBtn">Compris</button></div>
       </div>
@@ -1261,10 +1558,19 @@ function setSessionButtonState(paused){
 
 function updateSessionPhase(step){
   const tag = document.getElementById('sessionTypeTag');
-  if(tag){
-    tag.textContent = step.action === 'PAUSE'
-      ? `Repos · avant type ${step.blockPos + 1}/${EXERCISE_SEQUENCE.length}`
-      : `Type ${step.blockPos}/${EXERCISE_SEQUENCE.length} · ${step.typeName || ''}`;
+  if(tag && activeExercise){
+    const ccount = activeExercise.contractionBlockCount;
+    if(step.action === 'PAUSE'){
+      const nextPhase = phaseNameForBlockId(step.blockId + 1, ccount);
+      tag.textContent = nextPhase === 'Contractions'
+        ? `Repos · avant type ${step.blockPos + 1}/${ccount}`
+        : `Repos · avant : ${nextPhase}`;
+    } else {
+      const phase = phaseNameForBlockId(step.blockId, ccount);
+      tag.textContent = phase === 'Contractions'
+        ? `Type ${step.blockPos}/${ccount} · ${step.typeName || ''}`
+        : step.typeName || phase;
+    }
   }
   const strip = document.getElementById('sessionTypeStrip');
   if(strip){
@@ -1295,10 +1601,17 @@ function updateSessionFrame(info){
   if(coachEl) coachEl.textContent = coachTextFor(step, t);
 
   if(haloEl){
-    const scale = (1 + glow*1.55).toFixed(3);
-    const opacity = Math.min(1, 0.1 + glow*0.95).toFixed(2);
-    haloEl.style.transform = `scale(${scale})`;
-    haloEl.style.opacity = opacity;
+    // Taille en px calculée (pas un transform:scale) et plafonnée par measureHaloGeom()
+    // — garantit que le halo ne touche jamais les bords de l'écran, quel que soit le
+    // type de contraction. Échelle purement proportionnelle depuis 0 (aucun palier/
+    // offset artificiel) : à glow=0, largeur/hauteur/opacité valent exactement 0. La
+    // transition CSS sur .circle-halo (voir style.css) se charge de lisser le passage
+    // d'une valeur cible à l'autre en douceur — jamais un saut brutal ("pas un coup").
+    const g = Math.max(0, Math.min(1, glow || 0));
+    const px = haloGeom.maxPx * g;
+    haloEl.style.width = px + 'px';
+    haloEl.style.height = px + 'px';
+    haloEl.style.opacity = g.toFixed(2);
   }
   if(rotorEl && step.blockTotalMs){
     const elapsedInBlock = Math.max(0, step.blockTotalMs - remainingTypeMs);
@@ -1309,12 +1622,13 @@ function updateSessionFrame(info){
 }
 
 function onSessionComplete(reason){
+  releaseWakeLock();
   if(reason === 'completed'){
     cue('finish');
     document.getElementById('sessionRoot').innerHTML = '';
     showFeedbackScreen();
   } else {
-    addSessionRecord({ id:'sess_'+Date.now(), exerciseName: KEGEL_EXERCISE.name, date: Date.now(), completed:false });
+    addSessionRecord({ id:'sess_'+Date.now(), exerciseName: (activeExercise && activeExercise.name) || 'Exercice de Kegel', date: Date.now(), completed:false });
     document.getElementById('sessionRoot').innerHTML = '';
     activeEngine = null;
     render();
@@ -1376,7 +1690,7 @@ function showFeedbackScreen(){
 function submitFeedback(fb){
   const record = {
     id: 'sess_' + Date.now(),
-    exerciseName: KEGEL_EXERCISE.name,
+    exerciseName: (activeExercise && activeExercise.name) || 'Exercice de Kegel',
     date: Date.now(),
     completed: true,
     feedback: fb,
