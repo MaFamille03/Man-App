@@ -73,135 +73,178 @@ async function hashPassword(pw){
 function getAccount(){ return lsGet('account', null); }
 function isLoggedIn(){ return !!lsGet('loggedIn', false) && !!getAccount(); }
 
-/* ============ 3. DONNÉES — dimensions, questionnaire ============ */
+/* ============ 3. DONNÉES — dimensions, questionnaire ============
+   Ce questionnaire est un AUTO-ÉVALUATION informelle (pas un outil diagnostique :
+   il n'y a pas de palpation clinique ni de mesure instrumentale possible dans une
+   app grand public). Pour s'en rapprocher autant que possible, les 4 dimensions et
+   la formulation des items s'appuient sur des repères issus d'outils réellement
+   utilisés en rééducation périnéale, transposés en questions d'auto-perception :
+     - "control"  ≈ composante Power du PERFECT scheme (Laycock & Jerwood, 2001) et
+       de l'échelle d'Oxford modifiée (0 Nil → 5 Strong, palpation digitale) : ici on
+       demande à la personne si elle perçoit une contraction nette et isolée plutôt
+       que de la mesurer, mais l'idée (aucune → franche contraction) est la même.
+     - "endurance" ≈ composantes Endurance / Repetitions / Fast du PERFECT scheme :
+       tenir l'effort, l'enchaîner, récupérer.
+     - "relaxation" reprend un principe central du PERFECT scheme souvent négligé
+       (Every Contraction Timed = relâchement complet entre les efforts) et de la
+       littérature sur l'hyperactivité périnéale : un périnée qui ne relâche pas
+       complètement est aussi un problème qu'un périnée trop faible.
+     - "arousalControl" s'appuie sur la logique de la manœuvre dite "the knack"
+       (contraction périnéale volontaire anticipée avant un effort brusque, utilisée
+       en prévention de l'incontinence d'effort) et sur la littérature récente
+       montrant un lien entre entraînement du plancher pelvien et meilleure maîtrise
+       volontaire lors de sensations d'urgence ou d'excitation (continence d'urgence,
+       mais aussi travaux sur le contrôle éjaculatoire).
+   Le score reste un pourcentage d'auto-perception (0-100%) par dimension, PAS une
+   valeur clinique. Sources consultées : PERFECT scheme (Laycock & Jerwood, 2001,
+   Physiotherapy), échelle d'Oxford modifiée (revues de fiabilité inter-examinateurs,
+   Physiotherapy 2011 / A Urologia 2019), ICIQ-UI SF et PFDI-20/PFIQ-7 (structure de
+   score par sommation, consultées pour la méthode plutôt que pour un contenu
+   directement transposable, ces deux outils visant l'incontinence et non un usage
+   grand public généraliste), et littérature sur l'entraînement périnéal et le
+   contrôle de l'excitation/éjaculation (Oxford Academic, Sexual Medicine, 2025). */
 const DIMENSIONS = [
-  { key:'control',       label:'Contrôle périnéal',  objective:"Sentir et déclencher la contraction avec précision, sans solliciter d'autres muscles." },
-  { key:'endurance',      label:'Endurance',          objective:"Maintenir l'effort dans la durée, sans que la contraction ne s'affaiblisse trop vite." },
-  { key:'relaxation',     label:'Relâchement',        objective:"Relâcher complètement entre les efforts, pour éviter les tensions résiduelles." },
-  { key:'arousalControl', label:"Contrôle réflexe",   objective:"Garder la maîtrise du plancher pelvien lors d'efforts brusques ou de sensations fortes." }
+  { key:'control',       label:'Contrôle périnéal',  objective:"Évaluer votre capacité à isoler et déclencher une contraction nette du plancher pelvien — un principe proche de l'échelle de force utilisée en rééducation périnéale (d'« aucune contraction perceptible » à une contraction franche)." },
+  { key:'endurance',      label:'Endurance',          objective:"Évaluer votre capacité à maintenir et répéter l'effort sans qu'il ne s'épuise trop vite — les volets « endurance » et « répétitions » d'une évaluation périnéale classique." },
+  { key:'relaxation',     label:'Relâchement',        objective:"Évaluer votre capacité à relâcher complètement entre deux efforts : un relâchement incomplet freine la rééducation autant qu'un manque de force." },
+  { key:'arousalControl', label:"Contrôle réflexe",   objective:"Évaluer votre capacité à mobiliser une contraction volontaire dans l'instant — face à une envie pressante, un effort brusque ou une sensation forte." }
 ];
 const DIM_LABEL = Object.fromEntries(DIMENSIONS.map(d=>[d.key,d.label]));
 const DIM_OBJECTIVE = Object.fromEntries(DIMENSIONS.map(d=>[d.key,d.objective]));
 
-const SCALE_LABELS = ['Pas du tout', 'Un peu', 'Moyennement', 'Bien', 'Tout à fait'];
+const SCALE_LABELS = ["Pas du tout d'accord", "Plutôt pas d'accord", "Neutre / incertain", "Plutôt d'accord", "Tout à fait d'accord"];
 
 const QUESTIONNAIRE = [
-  { id:'c1', dim:'control', text:"Je sens clairement mon périnée se contracter quand je le sollicite." },
-  { id:'c2', dim:'control', text:"Je peux déclencher une contraction du plancher pelvien à volonté, sans forcer sur les cuisses ou les fessiers." },
-  { id:'c3', dim:'control', text:"J'arrive à isoler la contraction sans retenir ma respiration." },
-  { id:'e1', dim:'endurance', text:"Je peux maintenir une contraction modérée plusieurs secondes sans qu'elle s'affaiblisse." },
-  { id:'e2', dim:'endurance', text:"Après plusieurs contractions répétées, je ne ressens pas de fatigue excessive du périnée." },
-  { id:'e3', dim:'endurance', text:"Je peux enchaîner plusieurs séries de contractions dans une même séance." },
-  { id:'r1', dim:'relaxation', text:"Après une contraction, je sens mon périnée revenir complètement au repos." },
-  { id:'r2', dim:'relaxation', text:"Je n'ai pas de tension permanente ou de gêne au niveau du périnée au quotidien." },
-  { id:'r3', dim:'relaxation', text:"Je parviens à relâcher consciemment mon périnée quand je me concentre dessus." },
-  { id:'a1', dim:'arousalControl', text:"Je me sens capable de retenir une envie pressante grâce à une contraction volontaire." },
-  { id:'a2', dim:'arousalControl', text:"Je maîtrise les réactions involontaires de mon plancher pelvien lors d'un effort brusque (toux, éternuement, saut)." },
-  { id:'a3', dim:'arousalControl', text:"Je me sens en contrôle de mon plancher pelvien dans les moments de forte intensité physique ou émotionnelle." }
+  { id:'c1', dim:'control', text:"Quand je me concentre, je sens nettement mon périnée se contracter — comme si je passais d'aucune sensation à une contraction franche." },
+  { id:'c2', dim:'control', text:"Je peux déclencher cette contraction à volonté, sans serrer les cuisses, les fessiers ou le ventre." },
+  { id:'c3', dim:'control', text:"J'arrive à contracter mon périnée sans bloquer ma respiration." },
+  { id:'e1', dim:'endurance', text:"Je peux maintenir une contraction moyenne pendant plusieurs secondes sans qu'elle ne faiblisse." },
+  { id:'e2', dim:'endurance', text:"Je peux répéter plusieurs contractions à la suite sans ressentir une fatigue marquée." },
+  { id:'e3', dim:'endurance', text:"Après une série d'exercices, mon périnée récupère rapidement plutôt que de rester fatigué toute la journée." },
+  { id:'r1', dim:'relaxation', text:"Après chaque contraction, je sens mon périnée revenir complètement au repos, pas seulement à moitié relâché." },
+  { id:'r2', dim:'relaxation', text:"Je n'ai pas de tension ou de gêne permanente au niveau du périnée en dehors des exercices." },
+  { id:'r3', dim:'relaxation', text:"Quand je m'y concentre, j'arrive à relâcher consciemment mon périnée plutôt que de le laisser « se détendre tout seul »." },
+  { id:'a1', dim:'arousalControl', text:"Face à une envie pressante, je me sens capable de la retenir quelques instants grâce à une contraction volontaire du périnée." },
+  { id:'a2', dim:'arousalControl', text:"Avant un effort brusque prévisible (toux, éternuement, saut, port de charge), je pense à contracter mon périnée par anticipation." },
+  { id:'a3', dim:'arousalControl', text:"Dans un moment de forte intensité physique ou émotionnelle, je garde une sensation de contrôle sur mon plancher pelvien plutôt que de le sentir m'échapper." }
 ];
 
 /* ============ 4. L'EXERCICE DE KEGEL — protocole unique, quotidien, x2/jour ============
    Moteur piloté par données. Types d'étape reconnus :
      CONTRACT / RELEASE / REST / HOLD / PULSE / RAMP_UP / RAMP_DOWN / LOOP / PAUSE
-   Principe demandé : 6 types de contraction différents, séparés par des pauses de
-   9 secondes ("Repos"), pour un exercice complet d'environ 6 minutes. Les instants
-   de relâchement À L'INTÉRIEUR d'un type de contraction s'appellent "Relâcher" ;
-   le mot "Repos" désigne désormais uniquement la pause de 9s ENTRE deux types.
-   ⚠️ Les durées précises de chaque type (en secondes) n'ont pas été fournies dans
-   le cahier des charges reçu ici : les valeurs ci-dessous sont une estimation
-   raisonnable construite pour respecter "~6 minutes au total, 6 types, pauses de
-   9s" — donnez-moi les chiffres exacts si vous en avez et je les applique tels quels. */
+   Structure exacte demandée : 5 types de contraction UNIQUES (le premier, "Trembling
+   2", revient une seconde fois en position 5/6), séparés par des pauses de 9s
+   ("Repos" — les relâchements À L'INTÉRIEUR d'un type s'appellent "Relâcher"). Le
+   nom de chaque type est conservé tel quel (non traduit). L'ancien type "Démarrage"
+   a été retiré (n'est plus nécessaire). Durée totale : 392s ≈ 6 min 32.
+     1. Trembling 2        45s  — contraction/relâchement de 1s en alternance
+     2. Front Clamp        60s  — contraction légère → forte (2s) puis relâchement (0.5s)
+     3. Short Holding 2     65s — serrer et tenir 6s puis relâcher 6s, en boucle
+     4. Starter             69s — 0.5s contract / 0.5s relâcher / 4s contract / 0.5s relâcher
+     5. Trembling 2 (bis)   45s — identique au type 1
+     6. Steady trembling    63s — contraction 4s / relâcher 2s, en boucle
+   Chaque durée ci-dessous a été construite pour tomber EXACTEMENT sur le total en
+   secondes fourni (ex. Trembling 2 : 22×[1000+1000] + 1000 = 45000ms). */
 const PAUSE_BETWEEN_TYPES_MS = 9000;
 
-const CONTRACTION_TYPES = [
-  {
-    id:'demarrage', name:'Démarrage', category:'control',
+function loopSteps(times, steps){
+  const out = [];
+  for(let i=0;i<times;i++) out.push(...steps);
+  return out;
+}
+
+const CONTRACTION_DEFINITIONS = {
+  'trembling-2': {
+    id:'trembling-2', name:'Trembling 2', category:'endurance',
     steps:[
-      { action:'REST', duration:3000 },
-      { action:'LOOP', times:5, steps:[
-        { action:'RAMP_UP', duration:1500, from:0, to:0.5 },
-        { action:'HOLD', duration:2000, intensity:0.5 },
-        { action:'RAMP_DOWN', duration:1500, from:0.5, to:0 },
-        { action:'REST', duration:2500 }
-      ]}
-    ]
+      ...loopSteps(22, [
+        { action:'CONTRACT', duration:1000, intensity:0.55 },
+        { action:'RELEASE', duration:1000 }
+      ]),
+      { action:'CONTRACT', duration:1000, intensity:0.55 }
+    ] // 22*(1000+1000) + 1000 = 45000ms
   },
-  {
-    id:'pince-avant', name:'Pince avant', category:'control',
-    steps:[
-      { action:'REST', duration:2000 },
-      { action:'LOOP', times:12, steps:[
-        { action:'RAMP_UP', duration:700, from:0, to:0.9 },
-        { action:'HOLD', duration:1200, intensity:0.9 },
-        { action:'RAMP_DOWN', duration:700, from:0.9, to:0 },
-        { action:'REST', duration:1000 }
-      ]}
-    ]
+  'front-clamp': {
+    id:'front-clamp', name:'Front Clamp', category:'control',
+    steps: loopSteps(24, [
+      { action:'RAMP_UP', duration:2000, from:0.3, to:1 },
+      { action:'RELEASE', duration:500 }
+    ]) // 24*(2000+500) = 60000ms
   },
-  {
-    id:'tremblement-2', name:'Tremblement 2', category:'endurance',
+  'short-holding-2': {
+    id:'short-holding-2', name:'Short Holding 2', category:'endurance',
     steps:[
-      { action:'REST', duration:3000 },
-      { action:'LOOP', times:48, steps:[
-        { action:'CONTRACT', duration:600, intensity:0.6 },
-        { action:'RELEASE', duration:600 }
-      ]}
-    ]
+      ...loopSteps(5, [
+        { action:'HOLD', duration:6000, intensity:0.85 },
+        { action:'RELEASE', duration:6000 }
+      ]),
+      { action:'HOLD', duration:5000, intensity:0.85 }
+    ] // 5*(6000+6000) + 5000 = 65000ms
   },
-  {
-    id:'maintien-court-2', name:'Maintien court 2', category:'endurance',
+  'starter': {
+    id:'starter', name:'Starter', category:'control',
     steps:[
-      { action:'REST', duration:3000 },
-      { action:'LOOP', times:6, steps:[
-        { action:'CONTRACT', duration:1000, intensity:0.75 },
-        { action:'HOLD', duration:5000, intensity:0.75 },
-        { action:'RELEASE', duration:1500 },
-        { action:'REST', duration:2000 }
-      ]}
-    ]
+      ...loopSteps(12, [
+        { action:'CONTRACT', duration:500, intensity:0.5 },
+        { action:'RELEASE', duration:500 },
+        { action:'CONTRACT', duration:4000, intensity:0.9 },
+        { action:'RELEASE', duration:500 }
+      ]),
+      { action:'CONTRACT', duration:500, intensity:0.5 },
+      { action:'RELEASE', duration:500 },
+      { action:'CONTRACT', duration:2000, intensity:0.9 }
+    ] // 12*(500+500+4000+500) + (500+500+2000) = 66000 + 3000 = 69000ms
   },
-  {
-    id:'respiration-relachement', name:'Respiration & relâchement', category:'relaxation',
+  'steady-trembling': {
+    id:'steady-trembling', name:'Steady trembling', category:'endurance',
     steps:[
-      { action:'REST', duration:4000 },
-      { action:'LOOP', times:5, steps:[
-        { action:'RAMP_UP', duration:2000, from:0, to:0.55 },
-        { action:'HOLD', duration:2500, intensity:0.55 },
-        { action:'RAMP_DOWN', duration:2500, from:0.55, to:0 },
-        { action:'REST', duration:3500 }
-      ]}
-    ]
-  },
-  {
-    id:'ancrage', name:'Ancrage', category:'arousalControl',
-    steps:[
-      { action:'REST', duration:3000 },
-      { action:'LOOP', times:5, steps:[
-        { action:'RAMP_UP', duration:1000, from:0, to:0.85 },
-        { action:'HOLD', duration:4000, intensity:0.85 },
-        { action:'PULSE', duration:2000, count:4, intensity:0.6 },
-        { action:'RELEASE', duration:1500 },
-        { action:'REST', duration:2000 }
-      ]}
-    ]
+      ...loopSteps(10, [
+        { action:'CONTRACT', duration:4000, intensity:0.7 },
+        { action:'RELEASE', duration:2000 }
+      ]),
+      { action:'CONTRACT', duration:3000, intensity:0.7 }
+    ] // 10*(4000+2000) + 3000 = 63000ms
   }
-];
+};
+
+// L'ordre exact demandé, avec "Trembling 2" répété en position 5.
+const EXERCISE_SEQUENCE = ['trembling-2', 'front-clamp', 'short-holding-2', 'starter', 'trembling-2', 'steady-trembling'];
 
 function buildDailyExercise(){
   const steps = [];
-  CONTRACTION_TYPES.forEach((block, i) => {
-    const flatBlock = flattenSteps(block.steps).map(s => Object.assign({}, s, {
-      typeIndex: i, typeName: block.name, typeCategory: block.category
-    }));
-    steps.push(...flatBlock);
-    if(i < CONTRACTION_TYPES.length - 1){
-      steps.push({ action:'PAUSE', duration: PAUSE_BETWEEN_TYPES_MS, typeIndex:i, typeName: block.name });
+  const segments = [];
+  EXERCISE_SEQUENCE.forEach((defId, i) => {
+    const def = CONTRACTION_DEFINITIONS[defId];
+    const flat = flattenSteps(def.steps);
+    const blockTotalMs = flat.reduce((a,s) => a + s.duration, 0);
+    const segIndex = segments.length;
+    segments.push({ kind:'block', name: def.name });
+    let cursor = blockTotalMs;
+    flat.forEach((s, si) => {
+      const remainingInBlockAtStepStart = cursor;
+      cursor -= s.duration;
+      steps.push(Object.assign({}, s, {
+        blockId: i, blockPos: i + 1,
+        typeName: def.name, typeCategory: def.category,
+        blockTotalMs, remainingInBlockAtStepStart,
+        segIndex, blockStart: si === 0
+      }));
+    });
+    if(i < EXERCISE_SEQUENCE.length - 1){
+      const pauseSegIndex = segments.length;
+      segments.push({ kind:'pause', name:'Repos' });
+      steps.push({
+        action:'PAUSE', duration: PAUSE_BETWEEN_TYPES_MS,
+        blockId:i, blockPos:i + 1, typeName: def.name, typeCategory: def.category,
+        blockTotalMs: PAUSE_BETWEEN_TYPES_MS, remainingInBlockAtStepStart: PAUSE_BETWEEN_TYPES_MS,
+        segIndex: pauseSegIndex, blockStart:false
+      });
     }
   });
   return {
     id:'exercice-kegel', name:'Exercice de Kegel',
-    objective:'6 types de contraction différents, séparés par des pauses de 9 secondes.',
-    steps
+    objective:"5 types de contraction (Trembling 2 répété), séparés par des pauses de 9 secondes.",
+    steps, segments
   };
 }
 const KEGEL_EXERCISE = buildDailyExercise();
@@ -211,6 +254,14 @@ const STEP_LABELS = {
   PULSE:'Battements', RAMP_UP:'Montée en intensité', RAMP_DOWN:'Descente en intensité',
   PAUSE:'Repos'
 };
+const STEP_COACH = {
+  CONTRACT:'Contractez', RELEASE:'Relâchez', REST:'Reposez-vous', HOLD:'Maintenez la contraction',
+  PULSE:'Petites pulsations', RAMP_DOWN:'Relâchez progressivement', PAUSE:'Relâchez, respirez'
+};
+function coachTextFor(step, t){
+  if(step.action === 'RAMP_UP') return (t != null && t < 0.5) ? 'Serrer légèrement' : 'Serrer fort';
+  return STEP_COACH[step.action] || '';
+}
 
 const TOTAL_WEEKS = 20;
 const DAILY_REQUIRED = 2;                       // 2 séances par jour, sans exception
@@ -385,6 +436,12 @@ function cue(kind, intensity){
     case 'pause': beep(380, 220, 0.13); break;
     case 'pulse-tick': vibrate(Math.round(60*inten)+30); beep(700, 55, 0.09); break;
     case 'hold-tick': vibrate(22); beep(620, 45, 0.06); break;
+    case 'type-transition':
+      // Signal distinct au changement de type de contraction (différent du "pause"
+      // qui marque l'entrée en repos) : repère fiable sans regarder l'écran.
+      vibrate([90,50,90]);
+      [740,988].forEach((f,i) => setTimeout(() => beep(f,130,0.15), i*130));
+      break;
     case 'finish':
       vibrate([80,60,80]);
       [880,988,1175].forEach((f,i) => setTimeout(() => beep(f,170,0.16), i*140));
@@ -520,6 +577,7 @@ class SessionEngine{
   }
 
   _cueForStep(step){
+    if(step.blockStart) cue('type-transition'); // nouveau type de contraction : repère distinct
     if(step.action === 'CONTRACT') cue('contract', step.intensity);
     else if(step.action === 'RAMP_UP') cue('rampup', step.to);
     else if(step.action === 'RELEASE') cue('release');
@@ -1118,25 +1176,37 @@ function launchSession(){
 
 function renderSessionShell(ex){
   const flat = flattenSteps(ex.steps);
+  const segments = ex.segments || [];
   const root = document.getElementById('sessionRoot');
   root.innerHTML = `
   <div class="session-overlay">
     <div class="session-top">
-      <div class="session-exo-name">${escapeHtml(ex.name)}</div>
+      <div>
+        <div class="session-exo-name">${escapeHtml(ex.name)}</div>
+        <div class="session-total-remaining" id="sessionTotalRemaining">Temps restant : ${formatMMSS(flat.reduce((a,s)=>a+s.duration,0))}</div>
+      </div>
       <button class="session-close" id="sessionCloseBtn">✕</button>
     </div>
     <div class="session-mid">
-      <div class="session-type" id="sessionType">Préparation</div>
-      <div class="session-phase" id="sessionPhase"></div>
+      <div class="session-type-tag" id="sessionTypeTag">Préparation</div>
       <div class="circle-wrap">
-        <div class="circle-outline" id="sessionCircle"></div>
-        <div class="circle-count" id="sessionCount">–</div>
+        <div class="circle-halo" id="sessionHalo"></div>
+        <div class="circle-ring">
+          <div class="ring-tick"></div>
+          <div class="ring-rotor" id="sessionRingRotor"><div class="ring-dot"></div></div>
+        </div>
+        <div class="circle-core">
+          <div class="circle-count" id="sessionCount">–</div>
+          <div class="circle-coach" id="sessionCoachLabel"></div>
+        </div>
       </div>
-      <div class="session-total-remaining" id="sessionTotalRemaining">Temps restant : ${formatMMSS(flat.reduce((a,s)=>a+s.duration,0))}</div>
     </div>
-    <div class="timeline-wrap">
-      <div class="timeline" id="sessionTimeline">
-        ${flat.map((s,i) => `<div class="tl-step ${s.action==='REST'?'rest-step':''} ${s.action==='PAUSE'?'pause-step':''}" data-idx="${i}"></div>`).join('')}
+    <div class="strip-area">
+      <button class="strip-help-btn" id="sessionHelpBtn" aria-label="Aide sur l'écran de séance">?</button>
+      <div class="type-strip-wrap">
+        <div class="type-strip" id="sessionTypeStrip">
+          ${segments.map((seg,i) => `<div class="seg ${seg.kind==='pause'?'seg-pause':''}" data-idx="${i}">${escapeHtml(seg.name)}</div>`).join('')}
+        </div>
       </div>
     </div>
     <div class="session-bottom">
@@ -1157,6 +1227,29 @@ function renderSessionShell(ex){
     if(!activeEngine) return;
     if(activeEngine.paused) activeEngine.resume(); else activeEngine.pause();
   });
+  document.getElementById('sessionHelpBtn').addEventListener('click', openHelpModal);
+}
+
+function openHelpModal(){
+  const root = document.getElementById('modalRoot');
+  root.innerHTML = `
+    <div class="modal-overlay" id="helpOverlay">
+      <div class="modal-card">
+        <div class="modal-title">Comment lire l'écran de séance</div>
+        <div class="modal-msg" style="text-align:left;">
+          <p style="margin:0 0 10px;"><strong>Halo rouge</strong> — s'élargit pendant une contraction et revient à rien au relâchement : plus il est large, plus la contraction en cours est intense.</p>
+          <p style="margin:0 0 10px;"><strong>Anneau et point</strong> — le point parcourt l'anneau pour montrer votre progression dans le type de contraction en cours.</p>
+          <p style="margin:0 0 10px;"><strong>Chiffre au centre</strong> — le temps restant, en secondes, pour le type de contraction en cours (jusqu'à 0, puis 9s de repos avant le type suivant).</p>
+          <p style="margin:0 0 10px;"><strong>Bandeau du bas</strong> — la séquence complète : à gauche ce qui est fini, au centre le type en cours, à droite ce qui arrive.</p>
+          <p style="margin:0;">Un bip et une vibration marquent chaque contraction, chaque relâchement et chaque changement de type, pour suivre la séance sans regarder l'écran.</p>
+        </div>
+        <div class="modal-actions"><button class="btn btn-primary btn-block" id="helpCloseBtn">Compris</button></div>
+      </div>
+    </div>`;
+  const overlay = document.getElementById('helpOverlay');
+  const close = () => { root.innerHTML = ''; };
+  overlay.addEventListener('click', (e) => { if(e.target === overlay) close(); });
+  document.getElementById('helpCloseBtn').addEventListener('click', close);
 }
 
 function setSessionButtonState(paused){
@@ -1167,37 +1260,52 @@ function setSessionButtonState(paused){
 }
 
 function updateSessionPhase(step){
-  const typeEl = document.getElementById('sessionType');
-  const phaseEl = document.getElementById('sessionPhase');
-  if(typeEl){
-    typeEl.textContent = step.action === 'PAUSE'
-      ? `Pause · avant type ${(step.typeIndex ?? 0) + 2}/${CONTRACTION_TYPES.length}`
-      : `Type ${(step.typeIndex ?? 0) + 1}/${CONTRACTION_TYPES.length} · ${step.typeName || ''}`;
+  const tag = document.getElementById('sessionTypeTag');
+  if(tag){
+    tag.textContent = step.action === 'PAUSE'
+      ? `Repos · avant type ${step.blockPos + 1}/${EXERCISE_SEQUENCE.length}`
+      : `Type ${step.blockPos}/${EXERCISE_SEQUENCE.length} · ${step.typeName || ''}`;
   }
-  if(phaseEl) phaseEl.textContent = STEP_LABELS[step.action] || step.action;
+  const strip = document.getElementById('sessionTypeStrip');
+  if(strip){
+    strip.querySelectorAll('.seg').forEach(n => {
+      const idx = parseInt(n.getAttribute('data-idx'), 10);
+      n.classList.toggle('done', idx < step.segIndex);
+      n.classList.toggle('current', idx === step.segIndex);
+      n.classList.toggle('upcoming', idx > step.segIndex);
+    });
+    const current = strip.querySelector('.seg.current');
+    if(current) current.scrollIntoView({ inline:'center', behavior:'smooth', block:'nearest' });
+  }
 }
 
 function updateSessionFrame(info){
+  const { step, t, glow } = info;
   const countEl = document.getElementById('sessionCount');
-  const circleEl = document.getElementById('sessionCircle');
+  const coachEl = document.getElementById('sessionCoachLabel');
+  const haloEl = document.getElementById('sessionHalo');
+  const rotorEl = document.getElementById('sessionRingRotor');
   const totalEl = document.getElementById('sessionTotalRemaining');
-  const timeline = document.getElementById('sessionTimeline');
-  if(countEl) countEl.textContent = Math.max(1, Math.ceil(info.remainingStepMs/1000));
-  if(circleEl){
-    const spread = Math.round(2 + 16*info.glow);
-    const alpha = (0.12 + 0.55*info.glow).toFixed(2);
-    circleEl.style.boxShadow = `0 0 0 ${spread}px rgba(221,31,47,${alpha})`;
+
+  // Décompte affiché au centre : le temps restant pour le TYPE de contraction en
+  // cours dans son ensemble (pas le micro-pas), jusqu'à 0.
+  const elapsedInStep = Math.max(0, step.duration - info.remainingStepMs);
+  const remainingTypeMs = Math.max(0, (step.remainingInBlockAtStepStart != null ? step.remainingInBlockAtStepStart : info.remainingStepMs) - elapsedInStep);
+  if(countEl) countEl.textContent = Math.max(0, Math.ceil(remainingTypeMs/1000));
+  if(coachEl) coachEl.textContent = coachTextFor(step, t);
+
+  if(haloEl){
+    const scale = (1 + glow*1.55).toFixed(3);
+    const opacity = Math.min(1, 0.1 + glow*0.95).toFixed(2);
+    haloEl.style.transform = `scale(${scale})`;
+    haloEl.style.opacity = opacity;
+  }
+  if(rotorEl && step.blockTotalMs){
+    const elapsedInBlock = Math.max(0, step.blockTotalMs - remainingTypeMs);
+    const angle = (elapsedInBlock / step.blockTotalMs) * 360;
+    rotorEl.style.transform = `rotate(${angle}deg)`;
   }
   if(totalEl) totalEl.textContent = `Temps restant : ${formatMMSS(info.remainingTotalMs)}`;
-  if(timeline && activeEngine){
-    const nodes = timeline.querySelectorAll('.tl-step');
-    nodes.forEach((n,i) => {
-      n.classList.toggle('done', i < activeEngine.stepIndex);
-      n.classList.toggle('current', i === activeEngine.stepIndex);
-    });
-    const current = timeline.querySelector('.tl-step.current');
-    if(current) current.scrollIntoView({ inline:'center', behavior:'smooth', block:'nearest' });
-  }
 }
 
 function onSessionComplete(reason){

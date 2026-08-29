@@ -73,7 +73,7 @@ input,select,textarea{ font-family:inherit; }
   box-shadow:var(--shadow);
   border:1px solid var(--border);
 }
-.card + .card{ margin-top:12px; }
+.card{ margin-top:12px; }
 .card h2{ font-size:14px; font-weight:800; margin:0 0 10px; letter-spacing:.2px; }
 
 .btn{
@@ -261,51 +261,79 @@ input,select,textarea{ font-family:inherit; }
   padding-top:var(--safe-top); padding-bottom:var(--safe-bottom);
 }
 .session-top{
-  display:flex; align-items:center; justify-content:space-between;
+  display:flex; align-items:flex-start; justify-content:space-between;
   padding:16px 18px 4px;
 }
 .session-exo-name{ font-size:13px; font-weight:700; color:rgba(255,255,255,.75); }
 .session-close{
   width:34px; height:34px; border-radius:50%; background:rgba(255,255,255,.08);
   border:none; color:#fff; font-size:16px; display:flex; align-items:center; justify-content:center; cursor:pointer;
+  flex:none;
 }
 
-.session-mid{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px; padding:10px 20px; }
+.session-mid{ flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; padding:10px 20px; min-height:0; }
 
-.session-type{ font-size:11.5px; font-weight:800; letter-spacing:.5px; text-transform:uppercase; color:rgba(255,255,255,.5); }
-.session-phase{ font-size:15px; font-weight:700; letter-spacing:.4px; color:var(--teal); min-height:20px; }
+.session-type-tag{ font-size:11.5px; font-weight:800; letter-spacing:.5px; text-transform:uppercase; color:rgba(255,255,255,.5); text-align:center; }
 
-/* Cercle transparent à bordure blanche fixe ; une teinte rouge en halo (box-shadow)
-   s'élargit autour du bord pendant la contraction et revient à rien au relâchement.
-   Le décompte (secondes de la phase en cours) reste au centre, toujours net. */
-.circle-wrap{ width:min(58vw,240px); height:min(58vw,240px); position:relative; }
-.circle-outline{
-  position:absolute; inset:0; border-radius:50%;
-  background:transparent;
-  border:2.5px solid rgba(255,255,255,.85);
-  box-shadow:0 0 0 0 rgba(221,31,47,0);
+/* Le cercle central reste modeste ; un large halo rouge (calque séparé, agrandi et
+   assombri via transform/opacity à chaque frame) s'élargit très visiblement autour
+   de lui pendant une contraction et revient à rien au relâchement — c'est LUI qui
+   doit se voir de loin, pas le petit cercle. Dégradé radial pensé pour aller du
+   rouge transparent près du centre vers un rouge net/pur en s'éloignant, comme une
+   onde qui part du cercle. Un anneau fin (avec un repère fixe en haut + un point
+   mobile) montre la progression dans le type de contraction en cours ; le chiffre
+   au centre est le temps restant (en secondes) pour ce type en cours, pas le
+   micro-pas — il décroît jusqu'à 0, puis vient le repos de 9s. */
+.circle-wrap{ width:min(80vw,320px); height:min(80vw,320px); position:relative; display:flex; align-items:center; justify-content:center; flex:none; }
+.circle-halo{
+  position:absolute; width:60%; height:60%; border-radius:50%;
+  background:radial-gradient(circle, rgba(221,31,47,0) 0%, rgba(221,31,47,0) 48%, rgba(221,31,47,.92) 80%, rgba(221,31,47,.08) 100%);
+  opacity:.1; transform:scale(1); pointer-events:none; will-change:opacity,transform;
 }
-.circle-count{
-  position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
-  font-size:56px; font-weight:800; color:#fff; font-variant-numeric:tabular-nums;
+.circle-ring{
+  position:absolute; width:46%; height:46%; border-radius:50%;
+  border:1.5px solid rgba(255,255,255,.3);
 }
+.ring-tick{
+  position:absolute; top:-4px; left:50%; width:2px; height:10px; border-radius:2px;
+  background:rgba(255,255,255,.6); transform:translateX(-50%);
+}
+.ring-rotor{ position:absolute; inset:0; }
+.ring-dot{
+  position:absolute; top:-4px; left:50%; width:9px; height:9px; border-radius:50%;
+  background:#fff; transform:translateX(-50%); box-shadow:0 0 8px rgba(255,255,255,.85);
+}
+.circle-core{
+  position:relative; width:40%; height:40%; border-radius:50%;
+  background:rgba(255,255,255,.04); border:1.5px solid rgba(255,255,255,.7);
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+}
+.circle-count{ font-size:clamp(30px,9vw,44px); font-weight:800; color:#fff; font-variant-numeric:tabular-nums; line-height:1; }
+.circle-coach{ font-size:12px; font-weight:600; color:rgba(255,255,255,.8); text-align:center; padding:0 8px; min-height:15px; }
 
-.session-total-remaining{ font-size:12px; color:rgba(255,255,255,.45); font-variant-numeric:tabular-nums; }
+.session-total-remaining{ font-size:11.5px; color:rgba(255,255,255,.45); font-variant-numeric:tabular-nums; margin-top:2px; }
 
-.timeline-wrap{ padding:6px 0 14px; }
-.timeline{
-  display:flex; align-items:flex-end; gap:7px; overflow-x:auto; padding:4px 18px 10px; scroll-behavior:smooth;
+/* ---------- Bandeau des types (fini / en cours / à venir) ---------- */
+.strip-area{ padding:2px 0 6px; }
+.strip-help-btn{
+  display:block; width:26px; height:26px; margin:0 auto 8px; border-radius:50%;
+  background:rgba(255,255,255,.1); border:none; color:#fff; font-size:13px; font-weight:800;
+  cursor:pointer; line-height:1;
+}
+.type-strip-wrap{ overflow:hidden; }
+.type-strip{
+  display:flex; align-items:center; gap:18px; overflow-x:auto; padding:4px 50vw 12px; scroll-behavior:smooth;
   -webkit-overflow-scrolling:touch;
 }
-.timeline::-webkit-scrollbar{ display:none; }
-.tl-step{
-  flex:none; width:11px; height:11px; border-radius:50%;
-  background:rgba(255,255,255,.18); position:relative; margin-top:5px;
+.type-strip::-webkit-scrollbar{ display:none; }
+.seg{
+  flex:none; font-size:12.5px; font-weight:700; color:rgba(255,255,255,.28); white-space:nowrap;
+  transition:color .2s ease, font-size .2s ease;
 }
-.tl-step.done{ background:var(--teal); }
-.tl-step.current{ width:15px; height:15px; margin-top:0; background:var(--violet); box-shadow:0 0 0 4px rgba(108,99,255,.28); }
-.tl-step.rest-step{ background:rgba(255,255,255,.1); width:7px; height:7px; margin-top:7px; }
-.tl-step.pause-step{ background:rgba(221,31,47,.4); width:9px; height:9px; margin-top:6px; }
+.seg.seg-pause{ font-size:11px; text-transform:uppercase; letter-spacing:.4px; }
+.seg.done{ color:rgba(255,255,255,.4); }
+.seg.upcoming{ color:rgba(255,255,255,.28); }
+.seg.current{ color:#fff; font-size:15px; font-weight:800; }
 
 .session-bottom{ padding:0 18px 18px; }
 .session-btn{
@@ -368,6 +396,5 @@ input,select,textarea{ font-family:inherit; }
 @media (max-width:380px){
   .wrap{ padding:calc(14px + var(--safe-top)) 13px 20px; }
   .today-card h3{ font-size:17px; }
-  .circle-count{ font-size:46px; }
-  .circle-wrap{ width:min(56vw,210px); height:min(56vw,210px); }
+  .circle-wrap{ width:min(74vw,270px); height:min(74vw,270px); }
 }
